@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>文件掃描器</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f5f5f2;--card:#fff;--tx:#1d1d1b;--mu:#6b6b66;--ac:#1a73e8;--bd:#dcdcd6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161616;--card:#222;--tx:#eee;--mu:#9a9a94;--ac:#6ea8fe;--bd:#3a3a38}}
+:root[data-theme="dark"]{--bg:#161616;--card:#222;--tx:#eee;--mu:#9a9a94;--ac:#6ea8fe;--bd:#3a3a38}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;padding:12px;max-width:640px;margin:auto}
+h1{font-size:20px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+button,.btn{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:10px 14px;cursor:pointer;display:inline-block}
+.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+button:disabled{opacity:.4}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+canvas{max-width:100%;display:block;margin:auto;border-radius:6px}
+#ed{touch-action:none;width:100%}
+.hide{display:none}
+.mu{color:var(--mu);font-size:13px}
+label{font-size:14px;display:flex;gap:4px;align-items:center}
+select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+#list{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.pg{border:1px solid var(--bd);border-radius:8px;padding:6px;text-align:center}
+.pg img{width:100%;border-radius:4px;background:#fff}
+.pg button{padding:4px 8px;font-size:12px;margin:2px}
+</style></head><body>
+<h1>📄 文件掃描器</h1>
+
+<div class="card" id="s0">
+  <label class="btn pri" for="f">📷 拍攝／選擇文件</label>
+  <input id="f" type="file" accept="image/*" capture="environment" class="hide">
+  <button id="openauto">🎥 連續自動拍攝</button>
+  <p id="camerr" class="hide" style="color:#d93025;font-size:14px;margin:8px 0 0"></p>
+  <p class="mu">手機會開啟相機；電腦可選擇圖片。文件盡量放在顏色對比明顯的桌面上。</p>
+</div>
+
+<div class="card hide" id="s3">
+  <b>連續自動拍攝</b>
+  <video id="vid" playsinline muted style="width:100%;border-radius:8px;margin-top:8px;background:#000"></video>
+  <div class="row">
+    <label>每 <input type="number" id="iv" value="3" min="1" max="60" style="width:56px;font:inherit;padding:6px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"> 秒拍一張</label>
+    <select id="amd"><option value="color">彩色</option><option value="gray">灰階</option><option value="bw">黑白</option></select>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="ash" checked>去陰影</label>
+    <label><input type="checkbox" id="afg" checked>去手指</label>
+    <label><input type="checkbox" id="askip" checked>找不到文件時略過</label>
+    <label><input type="checkbox" id="adup" checked>略過重複頁面</label>
+  </div>
+  <div class="row"><button class="pri" id="go">▶ 開始</button><button id="closeauto">結束並返回</button></div>
+  <p class="mu" id="ast"></p>
+</div>
+
+<div class="card hide" id="s1">
+  <b>① 確認邊緣</b> <span class="mu">拖曳四個圓點調整</span>
+  <canvas id="ed"></canvas>
+  <div class="row"><button id="redo">重新偵測</button><button class="pri" id="crop">裁切並拉直 →</button><button id="cancel1">取消</button></div>
+</div>
+
+<div class="card hide" id="s2">
+  <b>② 清理效果</b>
+  <canvas id="pv" style="margin-top:8px;border:1px solid var(--bd)"></canvas>
+  <div class="row">
+    <label><input type="checkbox" id="sh" checked>去陰影</label>
+    <label><input type="checkbox" id="fg" checked>去手指</label>
+    <select id="md"><option value="color">彩色</option><option value="gray">灰階</option><option value="bw">黑白</option></select>
+  </div>
+  <div class="row"><button class="pri" id="save">儲存為 JPG 頁面</button><button id="back">← 調整邊緣</button></div>
+  <p class="mu" id="st"></p>
+</div>
+
+<div class="card">
+  <b>已掃描頁面 <span id="cnt">(0)</span></b>
+  <div id="list" style="margin-top:8px"></div>
+  <p class="mu" id="empty">尚無頁面</p>
+  <div class="row"><button class="pri" id="pdf" disabled>輸出 PDF</button><button id="clr" disabled>清空全部</button></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let detectOk=true,src,corners=[],raw,res,pages=[],drag=-1,K=1;
+
+/* ---------- 工具 ---------- */
+function box(a,w,h,r){const t=new Float32Array(a.length),o=new Float32Array(a.length),n=2*r+1,cl=(v,m)=>v<0?0:v>m?m:v;
+ for(let y=0;y<h;y++){const b=y*w;let s=0;for(let x=-r;x<=r;x++)s+=a[b+cl(x,w-1)];
+  for(let x=0;x<w;x++){t[b+x]=s/n;s+=a[b+cl(x+r+1,w-1)]-a[b+cl(x-r,w-1)];}}
+ for(let x=0;x<w;x++){let s=0;for(let y=-r;y<=r;y++)s+=t[cl(y,h-1)*w+x];
+  for(let y=0;y<h;y++){o[y*w+x]=s/n;s+=t[cl(y+r+1,h-1)*w+x]-t[cl(y-r,h-1)*w+x];}}
+ return o}
+function mx(a,w,h,r){const t=new Float32Array(a.length),o=new Float32Array(a.length);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){let m=0;for(let k=-r;k<=r;k++){const xx=x+k;if(xx>=0&&xx<w&&a[y*w+xx]>m)m=a[y*w+xx]}t[y*w+x]=m}
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){let m=0;for(let k=-r;k<=r;k++){const yy=y+k;if(yy>=0&&yy<h&&t[yy*w+x]>m)m=t[yy*w+x]}o[y*w+x]=m}
+ return o}
+const mk=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c};
+
+/* ---------- 自動偵測邊緣 ---------- */
+function detect(c){
+ const k=Math.min(1,320/Math.max(c.width,c.height)),w=Math.round(c.width*k),h=Math.round(c.height*k);
+ const x=mk(w,h).getContext('2d',{willReadFrequently:true});x.drawImage(c,0,0,w,h);
+ const d=x.getImageData(0,0,w,h).data,n=w*h,g=new Float32Array(n),hist=new Array(256).fill(0);
+ for(let i=0;i<n;i++)g[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];
+ const b=box(g,w,h,2);for(let i=0;i<n;i++)hist[b[i]|0]++;
+ let sum=0,sB=0,wB=0,best=0,th=128;for(let i=0;i<256;i++)sum+=i*hist[i];
+ for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=n-wB;if(!wF)break;sB+=i*hist[i];
+  const v=wB*wF*Math.pow(sB/wB-(sum-sB)/wF,2);if(v>best){best=v;th=i}}
+ const lab=new Uint8Array(n),st=new Int32Array(n);let top={a:0};
+ for(let s=0;s<n;s++){if(lab[s]||b[s]<=th)continue;
+  let sp=0,a=0,mn1=1e9,mx1=-1e9,mn2=1e9,mx2=-1e9,P=[0,0,0,0];st[sp++]=s;lab[s]=1;
+  while(sp){const p=st[--sp],px=p%w,py=(p/w)|0;a++;const s1=px+py,s2=px-py;
+   if(s1<mn1){mn1=s1;P[0]=[px,py]}if(s1>mx1){mx1=s1;P[2]=[px,py]}
+   if(s2>mx2){mx2=s2;P[1]=[px,py]}if(s2<mn2){mn2=s2;P[3]=[px,py]}
+   for(const q of [p-1,p+1,p-w,p+w]){if(q<0||q>=n||lab[q]||b[q]<=th)continue;
+    if((q===p-1&&px===0)||(q===p+1&&px===w-1))continue;lab[q]=1;st[sp++]=q}}
+  if(a>top.a)top={a,P}}
+ detectOk=top.a>=n*.1;if(!detectOk)return [[.05*c.width,.05*c.height],[.95*c.width,.05*c.height],[.95*c.width,.95*c.height],[.05*c.width,.95*c.height]];
+ return top.P.map(p=>[p[0]/k,p[1]/k])}
+
+/* ---------- 邊緣編輯器 ---------- */
+function drawEd(){const e=$('ed'),r=Math.min(1,900/src.width);e.width=src.width*r;e.height=src.height*r;K=r;
+ const x=e.getContext('2d');x.drawImage(src,0,0,e.width,e.height);
+ x.strokeStyle='#1a73e8';x.lineWidth=3;x.fillStyle='rgba(26,115,232,.15)';x.beginPath();
+ corners.forEach((p,i)=>i?x.lineTo(p[0]*K,p[1]*K):x.moveTo(p[0]*K,p[1]*K));x.closePath();x.fill();x.stroke();
+ corners.forEach(p=>{x.beginPath();x.arc(p[0]*K,p[1]*K,14,0,7);x.fillStyle='#fff';x.fill();x.stroke()})}
+function pt(ev){const e=$('ed'),b=e.getBoundingClientRect();return [(ev.clientX-b.left)*e.width/b.width/K,(ev.clientY-b.top)*e.height/b.height/K]}
+$('ed').onpointerdown=ev=>{const p=pt(ev);let bd=1e9;corners.forEach((c,i)=>{const d=Math.hypot(c[0]-p[0],c[1]-p[1]);if(d<bd){bd=d;drag=i}});
+ if(bd*K>60*($('ed').getBoundingClientRect().width?$('ed').width/$('ed').getBoundingClientRect().width:1))drag=-1;
+ if(drag>=0)$('ed').setPointerCapture(ev.pointerId)};
+$('ed').onpointermove=ev=>{if(drag<0)return;const p=pt(ev);corners[drag]=[Math.max(0,Math.min(src.width,p[0])),Math.max(0,Math.min(src.height,p[1]))];drawEd()};
+$('ed').onpointerup=()=>drag=-1;
+
+/* ---------- 透視拉直 ---------- */
+function solve(A,b){const n=8;for(let i=0;i<n;i++)A[i].push(b[i]);
+ for(let i=0;i<n;i++){let m=i;for(let r=i+1;r<n;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;[A[i],A[m]]=[A[m],A[i]];
+  for(let r=0;r<n;r++){if(r===i)continue;const f=A[r][i]/A[i][i];for(let c=i;c<=n;c++)A[r][c]-=f*A[i][c]}}
+ return A.map((r,i)=>r[n]/r[i])}
+function warp(){const [tl,tr,br,bl]=corners,D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+ const W=Math.max(50,Math.round(Math.max(D(tl,tr),D(bl,br)))),H=Math.max(50,Math.round(Math.max(D(tl,bl),D(tr,br))));
+ const dst=[[0,0],[W,0],[W,H],[0,H]],A=[],b=[];
+ for(let i=0;i<4;i++){const [x,y]=dst[i],[u,v]=corners[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}
+ const h=solve(A,b),sw=src.width,sh=src.height,sd=src.getContext('2d').getImageData(0,0,sw,sh).data;
+ const o=mk(W,H),ox=o.getContext('2d'),id=ox.createImageData(W,H),od=id.data;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const z=h[6]*x+h[7]*y+1;let u=(h[0]*x+h[1]*y+h[2])/z,v=(h[3]*x+h[4]*y+h[5])/z;
+  u=Math.max(0,Math.min(sw-1.001,u));v=Math.max(0,Math.min(sh-1.001,v));
+  const x0=u|0,y0=v|0,fx=u-x0,fy=v-y0,i=(y0*sw+x0)*4,p=(y*W+x)*4;
+  for(let c=0;c<3;c++)od[p+c]=(sd[i+c]*(1-fx)+sd[i+4+c]*fx)*(1-fy)+(sd[i+sw*4+c]*(1-fx)+sd[i+sw*4+4+c]*fx)*fy;
+  od[p+3]=255}
+ ox.putImageData(id,0,0);return o}
+
+/* ---------- 清理：去手指、去陰影、模式 ---------- */
+function enhance(r,o){
+ const w=r.width,h=r.height,c=mk(w,h),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(r,0,0);
+ const id=x.getImageData(0,0,w,h),d=id.data;
+ if(o.fg){ // 邊緣區域的膚色 → 以紙白填補
+  const q=4,sw=Math.ceil(w/q),sh=Math.ceil(h/q);let m=new Float32Array(sw*sh);
+  for(let j=0;j<sh;j++)for(let i=0;i<sw;i++){const X=Math.min(w-1,i*q),Y=Math.min(h-1,j*q);
+   if(X>w*.2&&X<w*.8&&Y>h*.2&&Y<h*.8)continue;
+   const p=(Y*w+X)*4,R=d[p],G=d[p+1],B=d[p+2],cr=128+.5*R-.4187*G-.0813*B,cb=128-.1687*R-.3313*G+.5*B;
+   if(cr>137&&cr<174&&cb>76&&cb<128&&R>G&&G>B*0.9&&R>70)m[j*sw+i]=1}
+  m=box(mx(m,sw,sh,2),sw,sh,1);
+  for(let y=0;y<h;y++)for(let X=0;X<w;X++)if(m[Math.min(sh-1,(y/q)|0)*sw+Math.min(sw-1,(X/q)|0)]>.3){const p=(y*w+X)*4;d[p]=d[p+1]=d[p+2]=255}}
+ if(o.sh){ // 估計背景光照並相除
+  x.putImageData(id,0,0);const s=8,bw=Math.max(8,Math.round(w/s)),bh=Math.max(8,Math.round(h/s)),sc=mk(bw,bh),sx=sc.getContext('2d',{willReadFrequently:true});
+  sx.drawImage(c,0,0,bw,bh);const sd=sx.getImageData(0,0,bw,bh),n=bw*bh;
+  for(let ch=0;ch<3;ch++){let a=new Float32Array(n);for(let i=0;i<n;i++)a[i]=sd.data[i*4+ch];
+   a=box(box(mx(a,bw,bh,3),bw,bh,5),bw,bh,5);for(let i=0;i<n;i++)sd.data[i*4+ch]=a[i]}
+  sx.putImageData(sd,0,0);const bg=(()=>{const t=mk(w,h).getContext('2d',{willReadFrequently:true});t.imageSmoothingQuality='high';t.drawImage(sc,0,0,w,h);return t.getImageData(0,0,w,h).data})();
+  for(let i=0;i<w*h*4;i+=4)for(let ch=0;ch<3;ch++){const v=d[i+ch]*255/Math.max(40,bg[i+ch]);d[i+ch]=Math.max(0,Math.min(255,(v-30)*255/215))}}
+ if(o.md!=='color')for(let i=0;i<w*h*4;i+=4){let y=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+  if(o.md==='bw')y=y<165?0:255;d[i]=d[i+1]=d[i+2]=y}
+ x.putImageData(id,0,0);return c}
+
+/* ---------- 流程 ---------- */
+const show=(a,b,c,d)=>{$('s3').classList.toggle('hide',!d);$('s1').classList.toggle('hide',!a);$('s2').classList.toggle('hide',!b);$('s0').classList.toggle('hide',!c)};
+$('f').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=new Image();
+ im.onload=()=>{const s=Math.min(1,2000/Math.max(im.width,im.height));src=mk(Math.round(im.width*s),Math.round(im.height*s));
+  src.getContext('2d').drawImage(im,0,0,src.width,src.height);URL.revokeObjectURL(im.src);corners=detect(src);show(1,0,0);drawEd();e.target.value=''};
+ im.src=URL.createObjectURL(f)};
+$('redo').onclick=()=>{corners=detect(src);drawEd()};
+$('cancel1').onclick=()=>show(0,0,1);
+$('back').onclick=()=>show(1,0,0);
+function render(){$('st').textContent='處理中…';setTimeout(()=>{res=enhance(raw,{sh:$('sh').checked,fg:$('fg').checked,md:$('md').value});
+ const p=$('pv');p.width=res.width;p.height=res.height;p.getContext('2d').drawImage(res,0,0);$('st').textContent=res.width+' × '+res.height+' px'},30)}
+$('crop').onclick=()=>{$('st').textContent='處理中…';show(0,1,0);setTimeout(()=>{raw=warp();render()},30)};
+['sh','fg','md'].forEach(i=>$(i).onchange=render);
+$('save').onclick=()=>{pages.push({url:res.toDataURL('image/jpeg',.92),w:res.width,h:res.height});list();show(0,0,1);window.scrollTo(0,document.body.scrollHeight)};
+
+async function saveFile(name,blob){let d=null;try{d=window.claude&&await claude.use('downloads')}catch(e){}
+ if(d){try{await d.save({filename:name,data:blob})}catch(e){}return}
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
+const toBlob=u=>fetch(u).then(r=>r.blob());
+function list(){const L=$('list');L.innerHTML='';
+ pages.forEach((p,i)=>{const d=document.createElement('div');d.className='pg';
+  d.innerHTML='<img src="'+p.url+'"><div class="mu">第 '+(i+1)+' 頁</div>';
+  [['JPG',async()=>saveFile('scan_'+String(i+1).padStart(2,'0')+'.jpg',await toBlob(p.url))],
+   ['↑',()=>{if(i){[pages[i-1],pages[i]]=[pages[i],pages[i-1]];list()}}],
+   ['↓',()=>{if(i<pages.length-1){[pages[i+1],pages[i]]=[pages[i],pages[i+1]];list()}}],
+   ['刪除',()=>{pages.splice(i,1);list()}]].forEach(([t,fn])=>{const b=document.createElement('button');b.textContent=t;b.onclick=fn;d.appendChild(b)});
+  L.appendChild(d)});
+ $('cnt').textContent='('+pages.length+')';$('empty').classList.toggle('hide',pages.length>0);$('pdf').disabled=$('clr').disabled=!pages.length}
+$('clr').onclick=()=>{if($('clr').dataset.c){pages=[];list();$('clr').textContent='清空全部';delete $('clr').dataset.c}else{$('clr').dataset.c=1;$('clr').textContent='再按一次確認清空';setTimeout(()=>{$('clr').textContent='清空全部';delete $('clr').dataset.c},3000)}};
+$('pdf').onclick=async()=>{const {jsPDF}=window.jspdf;let doc;
+ pages.forEach((p,i)=>{const land=p.w>p.h;if(!i)doc=new jsPDF({unit:'mm',format:'a4',orientation:land?'l':'p'});else doc.addPage('a4',land?'l':'p');
+  const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),s=Math.min(W/p.w,H/p.h),w=p.w*s,h=p.h*s;
+  doc.addImage(p.url,'JPEG',(W-w)/2,(H-h)/2,w,h)});
+ await saveFile('scan.pdf',doc.output('blob'))};
+list();
+
+/* ---------- 連續自動拍攝 ---------- */
+let stream,timer,busy=false,left=0,lastSig=null;
+const gray48=c=>{const t=mk(48,48).getContext('2d',{willReadFrequently:true});t.drawImage(c,0,0,48,48);const d=t.getImageData(0,0,48,48).data,a=[];for(let i=0;i<d.length;i+=4)a.push(d[i]*.3+d[i+1]*.59+d[i+2]*.11);return a};
+$('openauto').onclick=async()=>{
+ const E=$('camerr');E.classList.add('hide');
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){E.textContent='此環境不支援相機即時串流。請把頁面連結複製到 Safari／Chrome 直接開啟，或改用「拍攝／選擇文件」。';E.classList.remove('hide');return}
+ try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  $('vid').srcObject=stream;await $('vid').play();show(0,0,0,1);$('ast').textContent='相機就緒，把文件對準畫面後按「開始」'}
+ catch(e){E.textContent='無法開啟相機（'+(e.name||'')+'）。可能是這個嵌入頁面沒有相機權限：請把頁面連結複製到 Safari／Chrome 直接開啟再試，並在瀏覽器允許相機。';E.classList.remove('hide')}};
+function stopAuto(){clearInterval(timer);timer=null;$('go').textContent='▶ 開始'}
+$('closeauto').onclick=()=>{stopAuto();stream&&stream.getTracks().forEach(t=>t.stop());stream=null;show(0,0,1,0)};
+$('go').onclick=()=>{if(timer){stopAuto();$('ast').textContent='已停止，共 '+pages.length+' 頁';return}
+ lastSig=null;left=Math.max(1,+$('iv').value||3);$('go').textContent='⏸ 停止';$('ast').textContent='下次拍攝：'+left+' 秒';timer=setInterval(tick,1000)};
+async function tick(){
+ if(busy)return;if(--left>0){$('ast').textContent='下次拍攝：'+left+' 秒（已存 '+pages.length+' 頁）';return}
+ left=Math.max(1,+$('iv').value||3);busy=true;$('ast').textContent='拍攝處理中…';
+ await new Promise(r=>setTimeout(r,30));let msg='';
+ try{const v=$('vid');if(!v.videoWidth)throw new Error('相機尚未就緒');
+  const k=Math.min(1,2000/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);
+  src=fr;corners=detect(fr);
+  if(!detectOk&&$('askip').checked)msg='未偵測到文件，已略過';
+  else{raw=warp();const out=enhance(raw,{sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value}),sg=gray48(out);
+   if($('adup').checked&&lastSig&&sg.reduce((a,x,i)=>a+Math.abs(x-lastSig[i]),0)/sg.length<3)msg='與上一頁相同，已略過';
+   else{pages.push({url:out.toDataURL('image/jpeg',.92),w:out.width,h:out.height});lastSig=sg;list();msg='✅ 已儲存第 '+pages.length+' 頁'}}
+ }catch(e){msg='錯誤：'+(e.message||e)}
+ busy=false;if(timer)$('ast').textContent=msg+'｜下次拍攝：'+left+' 秒'}
+</script></body></html>
