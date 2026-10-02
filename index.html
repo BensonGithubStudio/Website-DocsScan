@@ -46,6 +46,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
     <select id="amd"><option value="color">彩色</option><option value="gray">灰階</option><option value="bw">黑白</option></select>
   </div>
   <div class="row">
+    <select id="bk"><option value="1">單頁文件</option><option value="L">書本攤開：只存左頁</option><option value="R">書本攤開：只存右頁</option><option value="B">書本攤開：左右兩頁都存</option></select>
     <label><input type="checkbox" id="ash" checked>去陰影</label>
     <label><input type="checkbox" id="afg" checked>去手指</label>
     <span class="mu">※ 必須偵測到完整文件並穩定後才會拍攝</span>
@@ -85,7 +86,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
 
 <script>
 const $=id=>document.getElementById(id);
-let src,corners=[],raw,res,pages=[],drag=-1,K=1;
+let HH,src,corners=[],raw,res,pages=[],drag=-1,K=1;
 
 /* ---------- 工具 ---------- */
 function box(a,w,h,r){const t=new Float32Array(a.length),o=new Float32Array(a.length),n=2*r+1,cl=(v,m)=>v<0?0:v>m?m:v;
@@ -229,7 +230,7 @@ function warp(){const [tl,tr,br,bl]=corners,D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b
  const W=Math.max(50,Math.round(Math.max(D(tl,tr),D(bl,br)))),H=Math.max(50,Math.round(Math.max(D(tl,bl),D(tr,br))));
  const dst=[[0,0],[W,0],[W,H],[0,H]],A=[],b=[];
  for(let i=0;i<4;i++){const [x,y]=dst[i],[u,v]=corners[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}
- const h=solve(A,b),sw=src.width,sh=src.height,sd=src.getContext('2d').getImageData(0,0,sw,sh).data;
+ const h=HH=solve(A,b),sw=src.width,sh=src.height,sd=src.getContext('2d').getImageData(0,0,sw,sh).data;
  const o=mk(W,H),ox=o.getContext('2d'),id=ox.createImageData(W,H),od=id.data;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const z=h[6]*x+h[7]*y+1;let u=(h[0]*x+h[1]*y+h[2])/z,v=(h[3]*x+h[4]*y+h[5])/z;
   u=Math.max(0,Math.min(sw-1.001,u));v=Math.max(0,Math.min(sh-1.001,v));
@@ -237,6 +238,16 @@ function warp(){const [tl,tr,br,bl]=corners,D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b
   for(let c=0;c<3;c++)od[p+c]=(sd[i+c]*(1-fx)+sd[i+4+c]*fx)*(1-fy)+(sd[i+sw*4+c]*(1-fx)+sd[i+sw*4+4+c]*fx)*fy;
   od[p+3]=255}
  ox.putImageData(id,0,0);return o}
+
+/* ---------- 書本：找書脊、座標對應 ---------- */
+const mp=(x,y)=>{const z=HH[6]*x+HH[7]*y+1;return[(HH[0]*x+HH[1]*y+HH[2])/z,(HH[3]*x+HH[4]*y+HH[5])/z]};
+function spineFrom(d,w,h){const col=new Float32Array(w);
+ for(let X=0;X<w;X++){let t=0;for(let Y=h*.1|0;Y<h*.9;Y++){const i=(Y*w+X)*4;t+=d[i]*.299+d[i+1]*.587+d[i+2]*.114}col[X]=t/(h*.8)}
+ const sm=box(col,w,1,3);let b=w>>1,mn=1e9,sum=0,c=0;
+ for(let X=w*.38|0;X<w*.62;X++){sum+=sm[X];c++;if(sm[X]<mn){mn=sm[X];b=X}}
+ return sum/c-mn<8?.5:b/w}
+function findSpine(r){const w=Math.min(400,r.width),h=Math.round(r.height*w/r.width),x=mk(w,h).getContext('2d',{willReadFrequently:true});
+ x.drawImage(r,0,0,w,h);return spineFrom(x.getImageData(0,0,w,h).data,w,h)}
 
 /* ---------- 清理：clean(去手指/陰影，較慢) + finish(亮度/對比/模式/旋轉，很快) ---------- */
 function clean(r,o){
@@ -360,13 +371,14 @@ function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;ltb=true
   else{const w=lastShot+IV()*1000-Date.now();if(w>0)t='文件已就緒｜下次拍攝：'+Math.ceil(w/1000)+' 秒（已存 '+pages.length+' 頁）';else{capture();return}}
   say(t)}finally{ltb=false}}
 async function capture(){busy=true;say('拍攝處理中…');await new Promise(r=>setTimeout(r,30));let msg='';
- try{const v=$('vid'),k=Math.min(1,2000/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
+ try{const bm=$('bk').value,v=$('vid'),k=Math.min(1,(bm!=='1'?3200:2000)/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
   fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=DET(fr,640,1); // 拍攝瞬間以較高解析度再確認一次
   if(!r.ok){stab=0;msg='拍攝瞬間未確認到完整文件，不拍（'+r.why+'）'}
-  else{src=fr;corners=r.pts;raw=warp();const tr=autoTrim(raw,corners);if(tr){corners=tr;raw=warp()}
-   const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0},out=process(raw,o),sg=gray48(out);lastShot=Date.now();
+  else{src=fr;const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0};let Qs=[r.pts];
+   if(bm!=='1'){corners=r.pts;raw=warp();const f=findSpine(raw),A=mp(f*raw.width,0),B=mp(f*raw.width,raw.height),[tl,tr,br,bl]=r.pts,Ql=[tl,A,B,bl],Qr=[A,tr,br,B];Qs=bm==='L'?[Ql]:bm==='R'?[Qr]:[Ql,Qr]} // 沿書脊把四邊形切成左右兩頁
+   const su=fr.toDataURL('image/jpeg',.88),outs=Qs.map(Q=>{corners=Q;raw=warp();const t=autoTrim(raw,corners);if(t){corners=t;raw=warp()}return{out:process(raw,o),c:corners.map(c=>c.slice())}}),sg=gray48(outs[0].out);lastShot=Date.now();
    if($('adup').checked&&lastSig&&sg.reduce((a,x,i)=>a+Math.abs(x-lastSig[i]),0)/sg.length<3)msg='與上一頁相同，已略過';
-   else{shutter();pages.push({url:out.toDataURL('image/jpeg',.92),w:out.width,h:out.height,srcUrl:fr.toDataURL('image/jpeg',.88),corners:corners.map(c=>c.slice()),opts:o});lastSig=sg;list();msg='✅ 已儲存第 '+pages.length+' 頁（僅文件本身）'}}
+   else{shutter();outs.forEach(({out,c})=>pages.push({url:out.toDataURL('image/jpeg',.92),w:out.width,h:out.height,srcUrl:su,corners:c,opts:o}));lastSig=sg;list();msg='✅ 已儲存 '+outs.length+' 頁（共 '+pages.length+' 頁）'}}
  }catch(e){msg='錯誤：'+(e.message||e)}
  msgUntil=Date.now()+1500;busy=false;say(msg)}
 $('closeauto').onclick=()=>{running=false;stopLive();$('go').textContent='▶ 開始';stream&&stream.getTracks().forEach(t=>t.stop());stream=null;show(0,0,1,0)};
