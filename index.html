@@ -450,7 +450,7 @@ async function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;lt
    P.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fill();x.stroke()};
   let sp=null,ss=null;
   if(r.ok){const P=S(r.pts),dg=Math.hypot(o.width,o.height),mv=lq?Math.max(...P.map((p,i)=>Math.hypot(p[0]-lq[i][0],p[1]-lq[i][1])))/dg:1;
-   stab=mv<.03?stab+1:1;lq=P;poly(P,stab>=NEED?'#1fb141':'#f5a623');
+   stab=mv<.015?stab+1:1;lq=P;poly(P,stab>=NEED?'#1fb141':'#f5a623');
    if(book){try{sp=liveSpine(fr,r.pts);pushSpine(sp);ss=stableSpine();
      const L=(xf0,xf1,c,dash)=>{const A=mp(xf0*sp.W,0,sp.H),B=mp(xf1*sp.W,sp.Hh,sp.H);x.save();x.strokeStyle=c;x.lineWidth=Math.max(4,o.width/150);x.setLineDash(dash);x.beginPath();x.moveTo(A[0]/k,A[1]/k);x.lineTo(B[0]/k,B[1]/k);x.stroke();x.restore()};
      if(ss)L(ss.xt,ss.xb,'#00c8ff',[]);else if(sp.ok)L(sp.xt,sp.xb,'#ff9800',[12,8])}catch(e){showErr('書脊偵測',e)}}else spHist.length=0}
@@ -465,7 +465,10 @@ async function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;lt
   say(t+'｜偵測：'+r.by+(aiReady&&!r.ai&&$('bk').value==='1'?'（AI 未找到四角）':'')+spi)}catch(e){showErr('即時偵測',e)}finally{ltb=false}}
 async function capture(){busy=true;say('拍攝處理中…');await new Promise(r=>setTimeout(r,30));let msg='';
  try{const bm=$('bk').value,v=$('vid'),k=Math.min(1,(bm!=='1'?3200:2000)/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
-  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=await DETA(fr,640,1); // 拍攝瞬間以較高解析度再確認一次
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const g=lq&&lq.map(p=>[p[0]*k,p[1]*k]);let r=await DETA(fr,640,1,g); // 拍攝瞬間以較高解析度再確認一次（帶入綠框當提示）
+  if(r.ok&&g){const dg=Math.hypot(fr.width,fr.height),dv=Math.max(...r.pts.map((p,i)=>Math.hypot(p[0]-g[i][0],p[1]-g[i][1])))/dg;
+   if(dv>.06)r={ok:false,why:'文件位置與綠框不符（可能晃動）'}; // 差太多：不拍，重新等待穩定
+   else if(dv>.012)r.pts=g} // 有落差：以使用者看到的綠框為準，確保「所見即所得」
   if(!r.ok){stab=0;msg='拍攝瞬間未確認到完整文件，不拍（'+r.why+'）'}
   else{src=fr;const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0};let Qs=[r.pts],bad='';
    if(bm!=='1'){corners=r.pts;raw=warp();let f=findSpine(raw);const ss=stableSpine(); // 高解析度結果與連續偵測的穩定結果比對，不一致時信任穩定結果
