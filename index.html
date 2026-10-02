@@ -325,12 +325,29 @@ function clean(r,o){
   m=box(mx(m,sw,sh,2),sw,sh,1);
   for(let y=0;y<h;y++)for(let X=0;X<w;X++)if(m[Math.min(sh-1,(y/q)|0)*sw+Math.min(sw-1,(X/q)|0)]>.3){const p=(y*w+X)*4;d[p]=d[p+1]=d[p+2]=255}}
  if(o.sh){
-  x.putImageData(id,0,0);const s=8,bw=Math.max(8,Math.round(w/s)),bh=Math.max(8,Math.round(h/s)),sc=mk(bw,bh),sx=sc.getContext('2d',{willReadFrequently:true});
-  sx.drawImage(c,0,0,bw,bh);const sd=sx.getImageData(0,0,bw,bh),n=bw*bh;
-  for(let ch=0;ch<3;ch++){let a=new Float32Array(n);for(let i=0;i<n;i++)a[i]=sd.data[i*4+ch];
-   a=box(box(mx(a,bw,bh,3),bw,bh,5),bw,bh,5);for(let i=0;i<n;i++)sd.data[i*4+ch]=a[i]}
-  sx.putImageData(sd,0,0);const bg=(()=>{const t=mk(w,h).getContext('2d',{willReadFrequently:true});t.imageSmoothingQuality='high';t.drawImage(sc,0,0,w,h);return t.getImageData(0,0,w,h).data})();
-  for(let i=0;i<w*h*4;i+=4)for(let ch=0;ch<3;ch++){const v=d[i+ch]*255/Math.max(40,bg[i+ch]);d[i+ch]=Math.max(0,Math.min(255,(v-30)*255/215))}}
+  /* 去陰影 v2：亮度光照估計（閉運算去字→保邊平滑）→ 三通道除同一張背景（不偏色）→ 白平衡 → 白點+軟膝（壓背面透印） */
+  x.putImageData(id,0,0);
+  const k=Math.min(1,480/Math.max(w,h)),bw=Math.max(8,Math.round(w*k)),bh=Math.max(8,Math.round(h*k)),n=bw*bh,
+   sc=mk(bw,bh),sx=sc.getContext('2d',{willReadFrequently:true});
+  sx.imageSmoothingQuality='high';sx.drawImage(c,0,0,bw,bh);
+  const sd=sx.getImageData(0,0,bw,bh);let L=new Float32Array(n);
+  for(let i=0;i<n;i++)L[i]=.299*sd.data[i*4]+.587*sd.data[i*4+1]+.114*sd.data[i*4+2];
+  const mn=(a,r)=>mx(a.map(v=>255-v),bw,bh,r).map(v=>255-v),r=Math.max(3,Math.round(Math.max(bw,bh)*.0145));
+  L=mn(mx(L,bw,bh,r),r);              // 閉運算：抹掉比 ~2r 細的深色（文字筆畫），保留紙面光照
+  L=box(box(L,bw,bh,2),bw,bh,2);      // 輕度平滑，邊緣模糊約 1% 畫面寬
+  // 全域紙色（白平衡）：取去陰影後最亮 40% 像素的各通道中位數
+  const fl=new Float32Array(n*3),ys=new Float32Array(n);
+  for(let i=0;i<n;i++){const b=Math.max(25,L[i]);for(let ch=0;ch<3;ch++)fl[i*3+ch]=sd.data[i*4+ch]*255/b;ys[i]=.299*fl[i*3]+.587*fl[i*3+1]+.114*fl[i*3+2]}
+  const ord=Array.from(ys).sort((p,q)=>p-q),yth=ord[Math.floor(n*.6)],gain=[1,1,1];
+  for(let ch=0;ch<3;ch++){const v=[];for(let i=0;i<n;i++)if(ys[i]>=yth)v.push(fl[i*3+ch]);v.sort((p,q)=>p-q);
+   const m=v[v.length>>1]||255;gain[ch]=Math.max(.7,Math.min(1.5,255/m))}
+  // 背景圖放大回原尺寸
+  const bc=mk(bw,bh),bx=bc.getContext('2d');const bi=bx.createImageData(bw,bh);
+  for(let i=0;i<n;i++){const v=Math.max(0,Math.min(255,Math.round(L[i])));bi.data[i*4]=bi.data[i*4+1]=bi.data[i*4+2]=v;bi.data[i*4+3]=255}
+  bx.putImageData(bi,0,0);
+  const bg=(()=>{const t=mk(w,h).getContext('2d',{willReadFrequently:true});t.imageSmoothingQuality='high';t.drawImage(bc,0,0,w,h);return t.getImageData(0,0,w,h).data})();
+  const WP=238,lut=new Uint8ClampedArray(256);for(let u=0;u<256;u++)lut[u]=255*Math.pow(Math.min(1,u/WP),1.15);
+  for(let i=0;i<w*h*4;i+=4){const b=Math.max(25,bg[i]);for(let ch=0;ch<3;ch++){const v=d[i+ch]*255/b*gain[ch];d[i+ch]=lut[v>255?255:v<0?0:(v+.5)|0]}}}
  x.putImageData(id,0,0);return c}
 function finish(c,o){
  const w=c.width,h=c.height,t=mk(w,h),x=t.getContext('2d',{willReadFrequently:true});x.drawImage(c,0,0);
