@@ -33,6 +33,11 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
 <h1>📄 文件掃描器</h1>
 <div id="eb" class="hide"><div class="row" style="margin:0 0 6px"><b>⚠ 錯誤訊息</b><button id="ebc">複製</button><button id="ebx">清除</button></div><pre id="ebt"></pre></div>
 
+<div class="card hide" id="rcv" style="border-color:#e8a200">
+  <b>🛟 發現上次未完成的暫存：<span id="rcvn">0</span> 頁</b><p class="mu" style="margin:4px 0 0">可能是網頁意外關閉或閃退前拍的頁面。</p>
+  <div class="row"><button class="pri" id="rcvy">復原這些頁面</button><button id="rcvx">捨棄</button></div>
+</div>
+
 <div class="card" id="s0">
   <label class="btn pri" for="f">📷 拍攝／選擇文件</label>
   <input id="f" type="file" accept="image/*" capture="environment" class="hide">
@@ -91,6 +96,8 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
   <b>已掃描頁面 <span id="cnt">(0)</span></b>
   <div id="list" style="margin-top:8px"></div>
   <p class="mu" id="empty">尚無頁面</p>
+  <div class="row" style="margin-top:10px"><b style="font-size:14px">🛟 防閃退備份</b><select id="bkm"><option value="0">僅瀏覽器暫存</option><option value="1" id="bkm1">＋存到資料夾</option><option value="2">＋每張下載 JPG</option></select><button id="bkdir" class="hide">選擇資料夾</button></div>
+  <p class="mu" id="bkst" style="margin:4px 0 0">每張拍完會自動暫存在瀏覽器，重新開啟網頁可一鍵復原。</p>
   <div class="row"><button id="imp">📥 批次匯入圖片</button><label><input type="checkbox" id="impsort" checked>依檔名排序</label><input type="file" id="impf" accept="image/*" multiple class="hide"></div>
   <p class="mu" id="ist" style="margin:4px 0 0"></p>
   <div class="row"><button class="pri" id="pdf" disabled>輸出 PDF</button><button id="clr" disabled>清空全部</button></div>
@@ -391,7 +398,7 @@ $('crop').onclick=()=>{$('st').textContent='處理中…';show(0,1,0);setTimeout
 $('rl').onclick=()=>{rot=(rot+270)%360;render()};$('rr').onclick=()=>{rot=(rot+90)%360;render()};
 $('rst').onclick=()=>{setOpts(DEF);render()};
 $('save').onclick=()=>{const pg={url:res.toDataURL('image/jpeg',.92),w:res.width,h:res.height,srcUrl:src.toDataURL('image/jpeg',.88),corners:corners.map(c=>c.slice()),opts:getOpts()};
- if(editIdx>=0)pages[editIdx]=pg;else pages.push(pg);mode(-1);list();show(0,0,1);$('list').scrollIntoView({behavior:'smooth'})};
+ if(editIdx>=0){pg.noBk=1;pages[editIdx]=pg}else pages.push(pg);mode(-1);list();show(0,0,1);$('list').scrollIntoView({behavior:'smooth'})};
 function editPage(i){const p=pages[i],im=new Image();im.onload=()=>{src=mk(im.width,im.height);src.getContext('2d').drawImage(im,0,0);
  corners=p.corners.map(c=>c.slice());setOpts(p.opts);mode(i);cl=null;show(0,1,0);$('st').textContent='處理中…';
  setTimeout(()=>{raw=warp();render()},30);$('s2').scrollIntoView({behavior:'smooth'})};im.src=p.srcUrl}
@@ -408,7 +415,7 @@ function list(){const L=$('list');L.innerHTML='';
    ['↓',()=>{if(i<pages.length-1){[pages[i+1],pages[i]]=[pages[i],pages[i+1]];list()}}],
    ['刪除',()=>{pages.splice(i,1);list()}]].forEach(([t,fn])=>{const b=document.createElement('button');b.textContent=t;b.onclick=fn;d.appendChild(b)});
   d.firstChild.onclick=()=>editPage(i);L.appendChild(d)});
- $('cnt').textContent='('+pages.length+')';$('empty').classList.toggle('hide',pages.length>0);$('pdf').disabled=$('clr').disabled=!pages.length}
+ $('cnt').textContent='('+pages.length+')';$('empty').classList.toggle('hide',pages.length>0);$('pdf').disabled=$('clr').disabled=!pages.length;persist()}
 $('clr').onclick=()=>{if($('clr').dataset.c){pages=[];list();$('clr').textContent='清空全部';delete $('clr').dataset.c}else{$('clr').dataset.c=1;$('clr').textContent='再按一次確認清空';setTimeout(()=>{$('clr').textContent='清空全部';delete $('clr').dataset.c},3000)}};
 $('pdf').onclick=async()=>{const {jsPDF}=window.jspdf;let doc;
  pages.forEach((p,i)=>{const land=p.w>p.h;if(!i)doc=new jsPDF({unit:'mm',format:'a4',orientation:land?'l':'p'});else doc.addPage('a4',land?'l':'p');
@@ -439,13 +446,74 @@ $('impf').onchange=async()=>{
    x.fillStyle='#fff';x.fillRect(0,0,w,h);x.imageSmoothingQuality='high';x.drawImage(im,0,0,w,h);
    if(im.close)im.close();
    const url=c.toDataURL('image/jpeg',.92);
-   pages.push({url,w,h,srcUrl:url,corners:[[0,0],[w,0],[w,h],[0,h]],opts:{sh:0,fg:0,md:'color',br:0,ct:1,rot:0},note:''});
+   pages.push({url,w,h,srcUrl:url,corners:[[0,0],[w,0],[w,h],[0,h]],opts:{sh:0,fg:0,md:'color',br:0,ct:1,rot:0},note:'',noBk:1});
    ok++;
   }catch(e){bad.push(fs[i].name);showErr('匯入失敗：'+fs[i].name,e)}
  }
  list();ib.disabled=false;
  $('ist').textContent='✅ 已匯入 '+ok+' 張（共 '+pages.length+' 頁）'+(bad.length?'｜❌ 失敗 '+bad.length+' 張：'+bad.join('、'):'');
 };
+
+/* ---------- 防閃退備份（IndexedDB 自動暫存 ＋ 選用資料夾／下載） ---------- */
+var DB=null,pend=false,stored=new Set(),pq=Promise.resolve(),leftover=[],bkm=0,dirH=null;
+const uid=()=>String(Date.now()).padStart(14,'0')+Math.random().toString(36).slice(2,5);
+const req=r=>new Promise((ok,ng)=>{r.onsuccess=()=>ok(r.result);r.onerror=()=>ng(r.error)});
+const txd=t=>new Promise((ok,ng)=>{t.oncomplete=ok;t.onerror=t.onabort=()=>ng(t.error)});
+const openDB=()=>new Promise((ok,ng)=>{const q=indexedDB.open('docscan',1);q.onupgradeneeded=()=>{q.result.createObjectStore('p',{keyPath:'id'});q.result.createObjectStore('m')};q.onsuccess=()=>ok(q.result);q.onerror=()=>ng(q.error)});
+function persist(){if(!DB)return;pq=pq.then(sync).catch(e=>showErr('暫存失敗',e))}
+async function sync(){
+ const cur=pages.slice();cur.forEach(p=>{if(!p.id)p.id=uid()});
+ const keep=new Set(cur.map(p=>p.id)),toPut=cur.filter(p=>!stored.has(p.id)),
+  t=DB.transaction(['p','m'],'readwrite'),ps=t.objectStore('p'),ms=t.objectStore('m');
+ toPut.forEach(p=>ps.put(p));
+ if(!pend){[...stored].forEach(id=>{if(!keep.has(id))ps.delete(id)});ms.put(cur.map(p=>p.id),'order')}
+ await txd(t);
+ toPut.forEach(p=>stored.add(p.id));
+ if(!pend)[...stored].forEach(id=>{if(!keep.has(id))stored.delete(id)});
+ for(const p of toPut)await backup(p)}
+const pad=(n,l=2)=>String(n).padStart(l,'0');
+function fname(p){const d=new Date(+p.id.slice(0,14));return 'scan_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'-'+pad(d.getMilliseconds(),3)+'.jpg'}
+async function backup(p){
+ if(p.noBk||!bkm)return;const n=fname(p);
+ try{const b=await toBlob(p.url);
+  if(bkm===1){if(!dirH)throw new Error('尚未選擇備份資料夾');const fh=await dirH.getFileHandle(n,{create:true}),w=await fh.createWritable();await w.write(b);await w.close()}
+  else{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000)}
+  $('bkst').textContent='✅ 已備份 '+n+(bkm===1?'（資料夾：'+dirH.name+'）':'（下載）')}
+ catch(e){showErr('備份失敗：'+n,e);$('bkst').textContent='⚠ 備份失敗：'+n+'（瀏覽器暫存仍有效）'}}
+function bkUI(){const f=bkm===1;$('bkdir').classList.toggle('hide',!f);
+ if(f)$('bkdir').textContent=dirH?'更換資料夾（目前：'+dirH.name+'）':'選擇資料夾';
+ $('bkst').textContent=bkm===1?(dirH?'每張拍完會存到資料夾「'+dirH.name+'」，同時暫存在瀏覽器。':'請先選擇備份資料夾。'):bkm===2?'每張拍完會自動下載一份 JPG（存放位置依瀏覽器下載設定），同時暫存在瀏覽器。':'每張拍完會自動暫存在瀏覽器，重新開啟網頁可一鍵復原。';
+ try{localStorage.setItem('bkm',bkm)}catch(e){}}
+async function pickDir(){
+ try{if(dirH&&(await dirH.queryPermission({mode:'readwrite'}))!=='granted'&&(await dirH.requestPermission({mode:'readwrite'}))==='granted'){bkUI();return true}
+  dirH=await showDirectoryPicker({mode:'readwrite'});
+  if(DB){try{await req(DB.transaction('m','readwrite').objectStore('m').put(dirH,'dir'))}catch(e){}}
+  bkUI();return true}
+ catch(e){if(e&&e.name!=='AbortError')showErr('選擇資料夾',e);return false}}
+$('bkm').onchange=async()=>{bkm=+$('bkm').value;
+ if(bkm===1&&!dirH){bkUI();if(!(await pickDir())){bkm=0;$('bkm').value=0}}
+ bkUI()};
+$('bkdir').onclick=async()=>{if(dirH&&(await dirH.queryPermission({mode:'readwrite'}))==='granted'){dirH=null}await pickDir();bkUI()};
+$('rcvy').onclick=()=>{pages=[...leftover,...pages];leftover=[];pend=false;$('rcv').classList.add('hide');list();$('list').scrollIntoView({behavior:'smooth'})};
+$('rcvx').onclick=()=>{const b=$('rcvx');if(!b.dataset.c){b.dataset.c=1;b.textContent='再按一次確認捨棄';setTimeout(()=>{b.textContent='捨棄';delete b.dataset.c},3000);return}
+ leftover=[];pend=false;$('rcv').classList.add('hide');b.textContent='捨棄';delete b.dataset.c;persist()};
+(async function initStore(){
+ if(!window.showDirectoryPicker)$('bkm1').remove();
+ try{const sv=+localStorage.getItem('bkm')||0;if(sv===2||(sv===1&&window.showDirectoryPicker)){bkm=sv}}catch(e){}
+ try{
+  if(!window.indexedDB)throw new Error('此瀏覽器不支援 IndexedDB');
+  DB=await openDB();
+  const t=DB.transaction(['p','m']),[all,order,dh]=await Promise.all([req(t.objectStore('p').getAll()),req(t.objectStore('m').get('order')),req(t.objectStore('m').get('dir'))]);
+  if(dh&&window.showDirectoryPicker)dirH=dh;
+  if(bkm===1&&!dirH)bkm=0;
+  $('bkm').value=bkm;bkUI();
+  if(bkm===1&&dirH)$('bkst').textContent='資料夾「'+dirH.name+'」可能需重新授權：請按右側按鈕。';
+  const map=new Map(all.map(p=>[p.id,p])),seq=(order||[]).filter(id=>map.has(id)).map(id=>map.get(id)),inO=new Set(seq.map(p=>p.id));
+  all.filter(p=>!inO.has(p.id)).sort((a,b)=>a.id<b.id?-1:1).forEach(p=>seq.push(p));
+  all.forEach(p=>stored.add(p.id));
+  if(seq.length){leftover=seq;pend=true;$('rcvn').textContent=seq.length;$('rcv').classList.remove('hide')}
+  persist()}
+ catch(e){DB=null;showErr('自動暫存無法啟用',e);$('bkst').textContent='⚠ 瀏覽器暫存無法使用：'+(e&&e.message||e)}})();
 
 /* ---------- 連續自動拍攝 ---------- */
 let stream,timer,busy=false,left=0,lastSig=null,AC;
