@@ -91,6 +91,8 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
   <b>已掃描頁面 <span id="cnt">(0)</span></b>
   <div id="list" style="margin-top:8px"></div>
   <p class="mu" id="empty">尚無頁面</p>
+  <div class="row"><button id="imp">📥 批次匯入圖片</button><label><input type="checkbox" id="impsort" checked>依檔名排序</label><input type="file" id="impf" accept="image/*" multiple class="hide"></div>
+  <p class="mu" id="ist" style="margin:4px 0 0"></p>
   <div class="row"><button class="pri" id="pdf" disabled>輸出 PDF</button><button id="clr" disabled>清空全部</button></div>
 </div>
 
@@ -414,6 +416,36 @@ $('pdf').onclick=async()=>{const {jsPDF}=window.jspdf;let doc;
   doc.addImage(p.url,'JPEG',(W-w)/2,(H-h)/2,w,h)});
  await saveFile('scan.pdf',doc.output('blob'))};
 list();
+
+/* ---------- 批次匯入圖片 ---------- */
+const MAXI=2600;
+const natCmp=(a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'});
+async function loadImg(f){
+ if(window.createImageBitmap){try{return await createImageBitmap(f)}catch(e){}}
+ return await new Promise((ok,ng)=>{const u=URL.createObjectURL(f),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);ok(im)};im.onerror=()=>{URL.revokeObjectURL(u);ng(new Error('無法解碼此圖片格式'))};im.src=u})}
+$('imp').onclick=()=>$('impf').click();
+$('impf').onchange=async()=>{
+ let fs=[...$('impf').files].filter(f=>f.type.startsWith('image/')||/\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name));
+ $('impf').value='';
+ if(!fs.length){$('ist').textContent='沒有可用的圖片';return}
+ if($('impsort').checked)fs.sort(natCmp);
+ const ib=$('imp');ib.disabled=true;let ok=0;const bad=[];
+ for(let i=0;i<fs.length;i++){
+  $('ist').textContent='匯入中 '+(i+1)+' / '+fs.length+'：'+fs[i].name;
+  await new Promise(r=>setTimeout(r,0));
+  try{
+   const im=await loadImg(fs[i]),sc=Math.min(1,MAXI/Math.max(im.width,im.height)),w=Math.round(im.width*sc),h=Math.round(im.height*sc),
+    c=mk(w,h),x=c.getContext('2d');
+   x.fillStyle='#fff';x.fillRect(0,0,w,h);x.imageSmoothingQuality='high';x.drawImage(im,0,0,w,h);
+   if(im.close)im.close();
+   const url=c.toDataURL('image/jpeg',.92);
+   pages.push({url,w,h,srcUrl:url,corners:[[0,0],[w,0],[w,h],[0,h]],opts:{sh:0,fg:0,md:'color',br:0,ct:1,rot:0},note:''});
+   ok++;
+  }catch(e){bad.push(fs[i].name);showErr('匯入失敗：'+fs[i].name,e)}
+ }
+ list();ib.disabled=false;
+ $('ist').textContent='✅ 已匯入 '+ok+' 張（共 '+pages.length+' 頁）'+(bad.length?'｜❌ 失敗 '+bad.length+' 張：'+bad.join('、'):'');
+};
 
 /* ---------- 連續自動拍攝 ---------- */
 let stream,timer,busy=false,left=0,lastSig=null,AC;
