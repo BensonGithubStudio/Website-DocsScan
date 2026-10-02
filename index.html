@@ -33,6 +33,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
   <label class="btn pri" for="f">📷 拍攝／選擇文件</label>
   <input id="f" type="file" accept="image/*" capture="environment" class="hide">
   <button id="openauto">🎥 連續自動拍攝</button>
+  <p id="cvst" class="mu" style="margin:4px 0 0">⏳ 精準偵測模組（OpenCV）載入中，期間先使用基本偵測…</p>
   <p id="camerr" class="hide" style="color:#d93025;font-size:14px;margin:8px 0 0"></p>
   <p class="mu">手機會開啟相機；電腦可選擇圖片。文件盡量放在顏色對比明顯的桌面上。</p>
 </div>
@@ -148,6 +149,56 @@ function autoTrim(r,P){
  const lp=(a,b,u)=>[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u],pt=(u,v)=>lp(lp(P[0],P[1],u),lp(P[3],P[2],u),v);
  return [pt(L,T),pt(R,T),pt(R,B),pt(L,B)]}
 
+/* ---------- OpenCV 偵測：邊緣＋輪廓＋四邊形擬合＋邊緣支持度驗證＋直線擬合精修 ---------- */
+let cvReady=false;
+function fitLn(P){const f=(Q)=>{const n=Q.length;let mx=0,my=0;Q.forEach(p=>{mx+=p[0];my+=p[1]});mx/=n;my/=n;let a=0,b=0,c=0;Q.forEach(p=>{const x=p[0]-mx,y=p[1]-my;a+=x*x;b+=x*y;c+=y*y});
+ const t=.5*Math.atan2(2*b,a-c);return{x:mx,y:my,dx:Math.cos(t),dy:Math.sin(t)}},dist=(l,p)=>Math.abs((p[0]-l.x)*l.dy-(p[1]-l.y)*l.dx);
+ let l=f(P);const ds=P.map(p=>dist(l,p)).sort((a,b)=>a-b),th=Math.max(1.2,ds[ds.length>>1]*2.5),K=P.filter(p=>dist(l,p)<=th);return K.length>=10?f(K):l}
+function refineQuad(ed,W,H,Q){const E=ed.data,band=Math.max(3,Math.round(Math.max(W,H)*.006)),L=[];
+ for(let i=0;i<4;i++){const a=Q[i],b=Q[(i+1)%4],dx=b[0]-a[0],dy=b[1]-a[1],len=Math.hypot(dx,dy),nx=-dy/len,ny=dx/len,pts=[];
+  for(let s=.08;s<=.92;s+=.01){const bx=a[0]+dx*s,by=a[1]+dy*s;let bo=null,bd=1e9;
+   for(let o=-band;o<=band;o++){const X=Math.round(bx+nx*o),Y=Math.round(by+ny*o);if(X<0||Y<0||X>=W||Y>=H)continue;if(E[Y*W+X]&&Math.abs(o)<bd){bd=Math.abs(o);bo=[X,Y]}}
+   if(bo)pts.push(bo)}
+  if(pts.length<25)return Q;L.push(fitLn(pts))}
+ const dg=Math.hypot(W,H);return Q.map((q,i)=>{const p=L[(i+3)%4],r=L[i],det=p.dx*(-r.dy)-p.dy*(-r.dx);if(Math.abs(det)<.2)return q;
+  const t=((r.x-p.x)*(-r.dy)-(r.y-p.y)*(-r.dx))/det,v=[p.x+p.dx*t,p.y+p.dy*t];return Math.hypot(v[0]-q[0],v[1]-q[1])<dg*.02?v:q})}
+function detectCV(c,mD=400,refine=false){
+ const k=Math.min(1,mD/Math.max(c.width,c.height)),w=Math.round(c.width*k),h=Math.round(c.height*k),n=w*h,T=[],M=m=>{T.push(m);return m};
+ const dflt=[[.05,.05],[.95,.05],[.95,.95],[.05,.95]].map(p=>[p[0]*c.width,p[1]*c.height]);
+ try{
+  const full=M(cv.imread(c)),sm=M(new cv.Mat()),gray=M(new cv.Mat()),bl=M(new cv.Mat()),ed=M(new cv.Mat()),edD=M(new cv.Mat()),bw=M(new cv.Mat());
+  cv.resize(full,sm,new cv.Size(w,h),0,0,cv.INTER_AREA);cv.cvtColor(sm,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,bl,new cv.Size(5,5),0);
+  cv.Canny(bl,ed,30,90);const k3=M(cv.Mat.ones(3,3,cv.CV_8U)),k5=M(cv.Mat.ones(5,5,cv.CV_8U));
+  cv.dilate(ed,edD,k3,new cv.Point(-1,-1),1);
+  const srcs=[],a1=M(new cv.Mat());cv.dilate(ed,a1,k3,new cv.Point(-1,-1),2);srcs.push([a1,cv.RETR_LIST]);
+  cv.threshold(bl,bw,0,255,cv.THRESH_BINARY|cv.THRESH_OTSU);cv.morphologyEx(bw,bw,cv.MORPH_CLOSE,k5);srcs.push([bw,cv.RETR_EXTERNAL]);
+  const D=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]),e=Math.max(2,w*.012),res=[];
+  const sup=(P)=>{let mn=1;for(let i=0;i<4;i++){const a=P[i],b=P[(i+1)%4];let hit=0,tot=0;for(let s=.05;s<=.95;s+=.025){const X=Math.round(a[0]+(b[0]-a[0])*s),Y=Math.round(a[1]+(b[1]-a[1])*s);tot++;if(X>=0&&Y>=0&&X<w&&Y<h&&edD.data[Y*w+X])hit++}mn=Math.min(mn,hit/tot)}return mn};
+  for(const[m,mode]of srcs){const cs=M(new cv.MatVector()),hi=M(new cv.Mat());cv.findContours(m,cs,hi,mode,cv.CHAIN_APPROX_SIMPLE);
+   for(let i=0;i<cs.size();i++){const ct=cs.get(i);const ar=cv.contourArea(ct);if(ar<n*.1){ct.delete();continue}
+    const hull=new cv.Mat();cv.convexHull(ct,hull,false,true);const ha=cv.contourArea(hull),pr=cv.arcLength(hull,true);let P=null;
+    for(const f of[.02,.03,.04,.06]){const ap=new cv.Mat();cv.approxPolyDP(hull,ap,pr*f,true);if(ap.rows===4){P=[];for(let j=0;j<4;j++)P.push([ap.data32S[j*2],ap.data32S[j*2+1]]);ap.delete();break}ap.delete()}
+    ct.delete();hull.delete();if(!P)continue;
+    const s=P.map(p=>p[0]+p[1]),d=P.map(p=>p[0]-p[1]),Q=[P[s.indexOf(Math.min(...s))],P[d.indexOf(Math.max(...d))],P[s.indexOf(Math.max(...s))],P[d.indexOf(Math.min(...d))]];
+    let A=0,sg=0;for(let j=0;j<4;j++){const a=Q[j],b=Q[(j+1)%4],r=Q[(j+2)%4];A+=a[0]*b[1]-b[0]*a[1];if((b[0]-a[0])*(r[1]-b[1])-(b[1]-a[1])*(r[0]-b[0])<=0)sg=1}A=Math.abs(A/2);
+    const L=[D(Q[0],Q[1]),D(Q[1],Q[2]),D(Q[2],Q[3]),D(Q[3],Q[0])],ra=(L[0]+L[2])/(L[1]+L[3]);let why='';
+    if(A>n*.95)why='畫面中找不到文件';
+    else if(Q.some(p=>p[0]<e||p[1]<e||p[0]>w-1-e||p[1]>h-1-e))why='請讓整份文件完整入鏡';
+    else if(sg)why='偵測到的形狀不像文件';else if(A<n*.1)why='文件太小，請靠近一點';
+    else if(ha/A>1.12||A/ha>1.12)why='邊緣不夠方正，可能被遮住';
+    else if(Math.min(...L)<w*.12||Math.min(L[0],L[2])/Math.max(L[0],L[2])<.5||Math.min(L[1],L[3])/Math.max(L[1],L[3])<.5)why='文件角度太歪，請放正一些';
+    else if(ra<.25||ra>4)why='形狀比例不像文件';
+    else{const sp=sup(Q);if(sp<.55)why='文件與背景對比不足，請放在深色桌面';else{res.push({Q,sc:A*sp});continue}}
+    res.push({Q,why,sc:A*.1})}}
+  const okL=res.filter(r=>!r.why).sort((a,b)=>b.sc-a.sc),U=Q=>Q.map(p=>[p[0]/k,p[1]/k]);
+  if(okL.length){let Q=U(okL[0].Q);
+   if(refine){const fg=M(new cv.Mat()),fb=M(new cv.Mat()),fe=M(new cv.Mat());cv.cvtColor(full,fg,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(fg,fb,new cv.Size(5,5),0);cv.Canny(fb,fe,30,90);Q=refineQuad(fe,c.width,c.height,Q)}
+   return{ok:true,pts:shrink(Q,refine?.996:.992),why:''}}
+  const bad=res.sort((a,b)=>b.sc-a.sc)[0];
+  return{ok:false,pts:dflt,cand:bad&&U(bad.Q),why:bad?bad.why:'畫面中找不到文件'}
+ }finally{T.forEach(m=>{try{m.delete()}catch(e){}})}}
+const DET=(c,m,rf)=>{if(cvReady)try{return detectCV(c,m,rf)}catch(e){console.warn('cv失敗，改用基本偵測',e)}return detect(c,m)};
+
 /* ---------- 邊緣編輯器 ---------- */
 function drawEd(){const e=$('ed'),r=Math.min(1,900/src.width);e.width=src.width*r;e.height=src.height*r;K=r;
  const x=e.getContext('2d');x.drawImage(src,0,0,e.width,e.height);
@@ -218,7 +269,7 @@ $('f').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=new Image();
  im.onload=()=>{const s=Math.min(1,2000/Math.max(im.width,im.height));src=mk(Math.round(im.width*s),Math.round(im.height*s));
   src.getContext('2d').drawImage(im,0,0,src.width,src.height);URL.revokeObjectURL(im.src);show(1,0,0);mode(-1);setOpts(DEF);redetect();e.target.value=''};
  im.src=URL.createObjectURL(f)};
-function redetect(){const r=detect(src,480);corners=r.pts;$('dm').textContent=r.ok?'✅ 已自動偵測到文件':'⚠ 未能確定文件邊緣（'+r.why+'），請手動拖曳四個圓點';drawEd()}
+function redetect(){const r=DET(src,480,1);corners=r.pts;$('dm').textContent=r.ok?'✅ 已自動偵測到文件':'⚠ 未能確定文件邊緣（'+r.why+'），請手動拖曳四個圓點';drawEd()}
 $('redo').onclick=redetect;
 $('cancel1').onclick=$('cancel2').onclick=()=>{mode(-1);show(0,0,1)};
 $('back').onclick=()=>{$('dm').textContent='';show(1,0,0);drawEd()};
@@ -286,8 +337,8 @@ function startLive(){stopLive();stab=0;lq=null;live=setInterval(liveTick,180)}
 function stopLive(){clearInterval(live);live=null;const o=$('ovl');o.getContext('2d').clearRect(0,0,o.width,o.height)}
 /* 即時偵測：畫出文件外框；連續穩定 NEED 次才算「真的偵測到」 */
 function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;ltb=true;
- try{const k=Math.min(1,320/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
-  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=detect(fr,320),o=$('ovl'),x=o.getContext('2d');
+ try{const k=Math.min(1,400/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=DET(fr,400),o=$('ovl'),x=o.getContext('2d');
   if(o.width!==v.videoWidth){o.width=v.videoWidth;o.height=v.videoHeight}x.clearRect(0,0,o.width,o.height);
   const S=P=>P.map(p=>[p[0]/k,p[1]/k]),poly=(P,c)=>{x.strokeStyle=c;x.lineWidth=Math.max(3,o.width/200);x.fillStyle=c+'33';x.beginPath();
    P.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fill();x.stroke()};
@@ -302,7 +353,7 @@ function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;ltb=true
   say(t)}finally{ltb=false}}
 async function capture(){busy=true;say('拍攝處理中…');await new Promise(r=>setTimeout(r,30));let msg='';
  try{const v=$('vid'),k=Math.min(1,2000/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
-  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=detect(fr,640); // 拍攝瞬間以較高解析度再確認一次
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=DET(fr,640,1); // 拍攝瞬間以較高解析度再確認一次
   if(!r.ok){stab=0;msg='拍攝瞬間未確認到完整文件，不拍（'+r.why+'）'}
   else{src=fr;corners=r.pts;raw=warp();const tr=autoTrim(raw,corners);if(tr){corners=tr;raw=warp()}
    const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0},out=process(raw,o),sg=gray48(out);lastShot=Date.now();
@@ -314,4 +365,13 @@ $('closeauto').onclick=()=>{running=false;stopLive();$('go').textContent='▶ �
 $('go').onclick=()=>{try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();AC.resume()}catch(e){}
  if(running){running=false;$('go').textContent='▶ 開始';say('已停止，共 '+pages.length+' 頁');return}
  running=true;lastSig=null;lastShot=0;$('go').textContent='⏸ 停止'};
+
+/* ---------- 載入 OpenCV.js（載入完成前自動使用基本偵測） ---------- */
+const CVURL=['https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js','https://docs.opencv.org/4.x/opencv.js'];
+function loadCV(i){if(i>=CVURL.length){$('cvst').textContent='⚠ 精準偵測模組載入失敗，使用基本偵測';return}
+ const s=document.createElement('script');s.src=CVURL[i];
+ s.onload=async()=>{try{let c=window.cv;if(c&&!c.Mat){if(typeof c.then==='function')c=await c;else await new Promise(r=>{c.onRuntimeInitialized=r})}
+  if(!(c&&c.Mat))throw 0;window.cv=c;cvReady=true;$('cvst').textContent='✅ 精準偵測已啟用（OpenCV）'}catch(e){loadCV(i+1)}};
+ s.onerror=()=>loadCV(i+1);document.head.appendChild(s)}
+loadCV(0);
 </script></body></html>
