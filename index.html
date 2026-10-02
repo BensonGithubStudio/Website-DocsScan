@@ -51,7 +51,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
     <select id="amd"><option value="color">彩色</option><option value="gray">灰階</option><option value="bw">黑白</option></select>
   </div>
   <div class="row">
-    <select id="bk"><option value="1">單頁文件</option><option value="L">書本攤開：只存左頁</option><option value="R">書本攤開：只存右頁</option><option value="B">書本攤開：左右兩頁都存</option></select>
+    <select id="bk"><option value="1">單頁文件</option><option value="L">書本攤開：只存左頁</option><option value="R">書本攤開：只存右頁</option><option value="B">書本攤開：左右兩頁都存</option><option value="A">書本攤開：自動只存較寬的那頁（單頁拍攝用）</option></select>
     <label><input type="checkbox" id="ash" checked>去陰影</label>
     <label><input type="checkbox" id="afg" checked>去手指</label>
     <span class="mu">※ 必須偵測到完整文件並穩定後才會拍攝</span>
@@ -258,28 +258,56 @@ function solve(A,b){const n=8;for(let i=0;i<n;i++)A[i].push(b[i]);
  for(let i=0;i<n;i++){let m=i;for(let r=i+1;r<n;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;[A[i],A[m]]=[A[m],A[i]];
   for(let r=0;r<n;r++){if(r===i)continue;const f=A[r][i]/A[i][i];for(let c=i;c<=n;c++)A[r][c]-=f*A[i][c]}}
  return A.map((r,i)=>r[n]/r[i])}
-function warp(){const [tl,tr,br,bl]=corners,D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
- const W=Math.max(50,Math.round(Math.max(D(tl,tr),D(bl,br)))),H=Math.max(50,Math.round(Math.max(D(tl,bl),D(tr,br))));
+function warpImg(S,P,sc=1){const [tl,tr,br,bl]=P,D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+ const W=Math.max(50,Math.round(Math.max(D(tl,tr),D(bl,br))*sc)),H=Math.max(50,Math.round(Math.max(D(tl,bl),D(tr,br))*sc));
  const dst=[[0,0],[W,0],[W,H],[0,H]],A=[],b=[];
- for(let i=0;i<4;i++){const [x,y]=dst[i],[u,v]=corners[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}
- const h=HH=solve(A,b),sw=src.width,sh=src.height,sd=src.getContext('2d').getImageData(0,0,sw,sh).data;
+ for(let i=0;i<4;i++){const [x,y]=dst[i],[u,v]=P[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}
+ const h=solve(A,b),sw=S.width,sh=S.height,sd=S.getContext('2d').getImageData(0,0,sw,sh).data;
  const o=mk(W,H),ox=o.getContext('2d'),id=ox.createImageData(W,H),od=id.data;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const z=h[6]*x+h[7]*y+1;let u=(h[0]*x+h[1]*y+h[2])/z,v=(h[3]*x+h[4]*y+h[5])/z;
   u=Math.max(0,Math.min(sw-1.001,u));v=Math.max(0,Math.min(sh-1.001,v));
   const x0=u|0,y0=v|0,fx=u-x0,fy=v-y0,i=(y0*sw+x0)*4,p=(y*W+x)*4;
   for(let c=0;c<3;c++)od[p+c]=(sd[i+c]*(1-fx)+sd[i+4+c]*fx)*(1-fy)+(sd[i+sw*4+c]*(1-fx)+sd[i+sw*4+4+c]*fx)*fy;
   od[p+3]=255}
- ox.putImageData(id,0,0);return o}
+ ox.putImageData(id,0,0);return{c:o,H:h}}
+function warp(){const r=warpImg(src,corners,1);HH=r.H;return r.c}
 
-/* ---------- 書本：找書脊、座標對應 ---------- */
-const mp=(x,y)=>{const z=HH[6]*x+HH[7]*y+1;return[(HH[0]*x+HH[1]*y+HH[2])/z,(HH[3]*x+HH[4]*y+HH[5])/z]};
-function spineFrom(d,w,h){const col=new Float32Array(w);
- for(let X=0;X<w;X++){let t=0;for(let Y=h*.1|0;Y<h*.9;Y++){const i=(Y*w+X)*4;t+=d[i]*.299+d[i+1]*.587+d[i+2]*.114}col[X]=t/(h*.8)}
- const sm=box(col,w,1,3);let b=w>>1,mn=1e9,sum=0,c=0;
- for(let X=w*.38|0;X<w*.62;X++){sum+=sm[X];c++;if(sm[X]<mn){mn=sm[X];b=X}}
- return sum/c-mn<8?.5:b/w}
+/* ---------- 書本：找書脊（偵測「一整條線」，不限位置、容許傾斜） ---------- */
+const mp=(x,y,H=HH)=>{const z=H[6]*x+H[7]*y+1;return[(H[0]*x+H[1]*y+H[2])/z,(H[3]*x+H[4]*y+H[5])/z]};
+/* 原理：書脊 = 一條貫穿整頁高度的「暗谷」（書頁彎進裝訂處產生的陰影／摺線）。
+   1. 灰階做「閉運算」抹掉細小文字筆畫，只留下較寬的暗區
+   2. 把頁面切成 16 條橫帶，各自算出「欄位亮度的谷值」（左右兩側平均 − 中間，除以亮度＝相對對比，
+      所以不怕光線漸層、也不怕單邊較亮）
+   3. 在 (位置 × 傾斜角) 空間投票：整條線上每條橫帶的谷值加總最大者，就是書脊
+   位置搜尋 4%～96%，所以書脊在畫面邊邊也找得到；回傳 xt/xb = 書脊在頁面頂端／底端的位置（0～1） */
+function spineLine(g0,w,h){
+ const r=3,g=mx(g0,w,h,r),iv=g.map(v=>255-v),ie=mx(iv,w,h,r);for(let i=0;i<g.length;i++)g[i]=255-ie[i]; // 閉運算：去細字
+ const NB=16,y0=Math.round(h*.06),y1=Math.round(h*.94),bh=(y1-y0)/NB,V=[],yc=[],sc=[Math.max(5,Math.round(w*.045)),Math.max(8,Math.round(w*.075))];
+ for(let b=0;b<NB;b++){const ya=Math.round(y0+b*bh),yb=Math.max(ya+1,Math.round(y0+(b+1)*bh)),col=new Float32Array(w),v=new Float32Array(w);
+  for(let y=ya;y<yb;y++)for(let x=0;x<w;x++)col[x]+=g[y*w+x];
+  for(let x=0;x<w;x++)col[x]/=(yb-ya);
+  for(const d of sc){const m=box(col,w,1,Math.max(1,d>>1));
+   for(let x=0;x<w;x++){const sd=(m[Math.max(0,x-d)]+m[Math.min(w-1,x+d)])/2,val=(sd-m[x])/Math.max(40,sd)*255;if(val>v[x])v[x]=val}}
+  for(let x=0;x<w;x++)v[x]=Math.min(v[x],80); // 單一橫帶的影響設上限，必須「整條線都有」才高分
+  V.push(v);yc.push((ya+yb)/2)}
+ const xa=Math.round(w*.04),xz=Math.round(w*.96),per=new Float32Array(w).fill(-1);let best={s:-1,x:w>>1,t:0,c:0};
+ for(let t=-.12;t<=.1201;t+=.01)for(let x0=xa;x0<=xz;x0++){let s=0,c=0,out=0;
+  for(let b=0;b<NB;b++){const x=Math.round(x0+t*(yc[b]-h/2));if(x<0||x>=w){out=1;break}const q=V[b][x];s+=q;if(q>2)c++}
+  if(out)continue;s=s/NB-Math.abs(t)*10;if(s>per[x0])per[x0]=s; // 分數相同時偏好較垂直的線
+  if(s>best.s)best={s,x:x0,t,c:c/NB}}
+ let sec=0;for(let x=xa;x<=xz;x++)if(Math.abs(x-best.x)>w*.08&&per[x]>sec)sec=per[x];
+ const amb=best.s>0?sec/best.s:1,ok=best.s>=5&&best.c>=.6&&(amb<.75||best.s>=25); // 真書脊只有一個明顯的峰；條紋（直排文字等）會有很多個差不多強的峰
+ return{ok,depth:best.s,cons:best.c,amb,xt:(best.x-best.t*h/2)/w,xb:(best.x+best.t*h/2)/w}}
 function findSpine(r){const w=Math.min(400,r.width),h=Math.round(r.height*w/r.width),x=mk(w,h).getContext('2d',{willReadFrequently:true});
- x.drawImage(r,0,0,w,h);return spineFrom(x.getImageData(0,0,w,h).data,w,h)}
+ x.imageSmoothingQuality='high';x.drawImage(r,0,0,w,h);const d=x.getImageData(0,0,w,h).data,g=new Float32Array(w*h);
+ for(let i=0;i<w*h;i++)g[i]=d[i*4]*.299+d[i*4+1]*.587+d[i*4+2]*.114;return spineLine(g,w,h)}
+/* 連續拍攝時：在低解析度的拉直畫面上即時找書脊，並累積最近幾次結果，穩定了才採用 */
+function liveSpine(fr,pts){const D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]),sc=Math.min(1,380/Math.max(D(pts[0],pts[1]),D(pts[3],pts[2]))),w=warpImg(fr,pts,sc),s=findSpine(w.c);s.H=w.H;s.W=w.c.width;s.Hh=w.c.height;return s}
+let spHist=[];
+function pushSpine(sp){spHist.push(sp&&sp.ok?{xt:sp.xt,xb:sp.xb}:null);if(spHist.length>8)spHist.shift()}
+function stableSpine(){const o=spHist.filter(Boolean);if(o.length<4)return null;const md=a=>a.slice().sort((p,q)=>p-q)[a.length>>1],mt=md(o.map(p=>p.xt)),mb=md(o.map(p=>p.xb)),
+ inl=o.filter(p=>Math.abs(p.xt-mt)<.03&&Math.abs(p.xb-mb)<.03);if(inl.length<4)return null;
+ return{xt:inl.reduce((a,p)=>a+p.xt,0)/inl.length,xb:inl.reduce((a,p)=>a+p.xb,0)/inl.length}}
 
 /* ---------- 清理：clean(去手指/陰影，較慢) + finish(亮度/對比/模式/旋轉，很快) ---------- */
 function clean(r,o){
@@ -384,33 +412,47 @@ $('openauto').onclick=async()=>{
   $('vid').srcObject=stream;await $('vid').play();show(0,0,0,1);startLive();$('ast').textContent='相機就緒，把文件對準畫面後按「開始」'}
  catch(e){showErr('相機',e);E.textContent='無法開啟相機（'+(e.name||'')+'）。可能是這個嵌入頁面沒有相機權限：請把頁面連結複製到 Safari／Chrome 直接開啟再試，並在瀏覽器允許相機。';E.classList.remove('hide')}};
 let running=false,live,lq=null,stab=0,lastShot=0,msgUntil=0,ltb=false;const NEED=4,IV=()=>Math.max(1,+$('iv').value||3),say=t=>{$('ast').textContent=t};
-function startLive(){stopLive();stab=0;lq=null;live=setInterval(liveTick,180)}
+function startLive(){stopLive();stab=0;lq=null;spHist=[];live=setInterval(liveTick,180)}
 function stopLive(){clearInterval(live);live=null;const o=$('ovl');o.getContext('2d').clearRect(0,0,o.width,o.height)}
 /* 即時偵測：畫出文件外框；連續穩定 NEED 次才算「真的偵測到」 */
 async function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;ltb=true;
- try{const k=Math.min(1,400/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
+ try{const book=$('bk').value!=='1',k=Math.min(1,(book?560:400)/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
   fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=await DETA(fr,400,0,lq&&lq.map(p=>[p[0]*k,p[1]*k])),o=$('ovl'),x=o.getContext('2d');
   if(o.width!==v.videoWidth){o.width=v.videoWidth;o.height=v.videoHeight}x.clearRect(0,0,o.width,o.height);
   const S=P=>P.map(p=>[p[0]/k,p[1]/k]),poly=(P,c)=>{x.strokeStyle=c;x.lineWidth=Math.max(3,o.width/200);x.fillStyle=c+'33';x.beginPath();
    P.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fill();x.stroke()};
+  let sp=null,ss=null;
   if(r.ok){const P=S(r.pts),dg=Math.hypot(o.width,o.height),mv=lq?Math.max(...P.map((p,i)=>Math.hypot(p[0]-lq[i][0],p[1]-lq[i][1])))/dg:1;
-   stab=mv<.03?stab+1:1;lq=P;poly(P,stab>=NEED?'#1fb141':'#f5a623')}
-  else{stab=0;lq=null;if(r.cand)poly(S(r.cand),'#d93025')}
+   stab=mv<.03?stab+1:1;lq=P;poly(P,stab>=NEED?'#1fb141':'#f5a623');
+   if(book){try{sp=liveSpine(fr,r.pts);pushSpine(sp);ss=stableSpine();
+     const L=(xf0,xf1,c,dash)=>{const A=mp(xf0*sp.W,0,sp.H),B=mp(xf1*sp.W,sp.Hh,sp.H);x.save();x.strokeStyle=c;x.lineWidth=Math.max(4,o.width/150);x.setLineDash(dash);x.beginPath();x.moveTo(A[0]/k,A[1]/k);x.lineTo(B[0]/k,B[1]/k);x.stroke();x.restore()};
+     if(ss)L(ss.xt,ss.xb,'#00c8ff',[]);else if(sp.ok)L(sp.xt,sp.xb,'#ff9800',[12,8])}catch(e){showErr('書脊偵測',e)}}else spHist.length=0}
+  else{stab=0;lq=null;spHist.length=0;if(r.cand)poly(S(r.cand),'#d93025')}
   if(Date.now()<msgUntil)return;let t;
+  const spi=book&&r.ok?(ss?'｜書脊：'+Math.round((ss.xt+ss.xb)*50)+'%處':'｜書脊：未穩定'+(sp?'（強度'+sp.depth.toFixed(1)+'）':'')):'';
   if(!running)t=r.ok?'✅ 已偵測到文件，按「開始」自動拍攝':'⚠ '+r.why;
   else if(!r.ok)t='⚠ '+r.why+'｜等待偵測到文件…（已存 '+pages.length+' 頁）';
   else if(stab<NEED)t='偵測到文件，請保持穩定…';
+  else if(book&&!ss)t='🔍 找不到書脊，請讓書脊（頁面彎進去的陰影處）完整入鏡…';
   else{const w=lastShot+IV()*1000-Date.now();if(w>0)t='文件已就緒｜下次拍攝：'+Math.ceil(w/1000)+' 秒（已存 '+pages.length+' 頁）';else{capture();return}}
-  say(t+'｜偵測：'+r.by+(aiReady&&!r.ai&&$('bk').value==='1'?'（AI 未找到四角）':''))}catch(e){showErr('即時偵測',e)}finally{ltb=false}}
+  say(t+'｜偵測：'+r.by+(aiReady&&!r.ai&&$('bk').value==='1'?'（AI 未找到四角）':'')+spi)}catch(e){showErr('即時偵測',e)}finally{ltb=false}}
 async function capture(){busy=true;say('拍攝處理中…');await new Promise(r=>setTimeout(r,30));let msg='';
  try{const bm=$('bk').value,v=$('vid'),k=Math.min(1,(bm!=='1'?3200:2000)/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
   fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=await DETA(fr,640,1); // 拍攝瞬間以較高解析度再確認一次
   if(!r.ok){stab=0;msg='拍攝瞬間未確認到完整文件，不拍（'+r.why+'）'}
-  else{src=fr;const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0};let Qs=[r.pts];
-   if(bm!=='1'){corners=r.pts;raw=warp();const f=findSpine(raw),A=mp(f*raw.width,0),B=mp(f*raw.width,raw.height),[tl,tr,br,bl]=r.pts,Ql=[tl,A,B,bl],Qr=[A,tr,br,B];Qs=bm==='L'?[Ql]:bm==='R'?[Qr]:[Ql,Qr]} // 沿書脊把四邊形切成左右兩頁
-   const su=fr.toDataURL('image/jpeg',.88),outs=Qs.map(Q=>{corners=Q;raw=warp();const t=autoTrim(raw,corners);if(t){corners=t;raw=warp()}return{out:process(raw,o),c:corners.map(c=>c.slice())}}),sg=gray48(outs[0].out);lastShot=Date.now();
-   if($('adup').checked&&lastSig&&sg.reduce((a,x,i)=>a+Math.abs(x-lastSig[i]),0)/sg.length<3)msg='與上一頁相同，已略過';
-   else{shutter();outs.forEach(({out,c})=>pages.push({url:out.toDataURL('image/jpeg',.92),w:out.width,h:out.height,srcUrl:su,corners:c,opts:o}));lastSig=sg;list();msg='✅ 已儲存 '+outs.length+' 頁（共 '+pages.length+' 頁）'}}
+  else{src=fr;const o={sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value,br:0,ct:1,rot:0};let Qs=[r.pts],bad='';
+   if(bm!=='1'){corners=r.pts;raw=warp();let f=findSpine(raw);const ss=stableSpine(); // 高解析度結果與連續偵測的穩定結果比對，不一致時信任穩定結果
+    if(!f.ok||(ss&&(Math.abs(f.xt-ss.xt)>.04||Math.abs(f.xb-ss.xb)>.04)))f=ss;
+    if(!f)bad='拍攝瞬間找不到書脊，不拍';
+    else{const A=mp(f.xt*raw.width,0),B=mp(f.xb*raw.width,raw.height),[tl,tr,br,bl]=r.pts,Ql=[tl,A,B,bl],Qr=[A,tr,br,B],fl=(f.xt+f.xb)/2,MIN=.1; // 沿書脊把四邊形切成左右兩頁
+     if(bm==='L'){if(fl<MIN)bad='左頁太窄（書脊太靠左），不拍';Qs=[Ql]}
+     else if(bm==='R'){if(1-fl<MIN)bad='右頁太窄（書脊太靠右），不拍';Qs=[Qr]}
+     else if(bm==='A')Qs=[fl>=.5?Ql:Qr];
+     else{Qs=[];if(fl>=MIN)Qs.push(Ql);if(1-fl>=MIN)Qs.push(Qr)}}} // 兩頁都存：太窄的一側（只露出一小條）自動略過
+   if(bad){stab=0;msg=bad}
+   else{const su=fr.toDataURL('image/jpeg',.88),outs=Qs.map(Q=>{corners=Q;raw=warp();const t=autoTrim(raw,corners);if(t){corners=t;raw=warp()}return{out:process(raw,o),c:corners.map(c=>c.slice())}}),sg=gray48(outs[0].out);lastShot=Date.now();
+    if($('adup').checked&&lastSig&&sg.reduce((a,x,i)=>a+Math.abs(x-lastSig[i]),0)/sg.length<3)msg='與上一頁相同，已略過';
+    else{shutter();outs.forEach(({out,c})=>pages.push({url:out.toDataURL('image/jpeg',.92),w:out.width,h:out.height,srcUrl:su,corners:c,opts:o}));lastSig=sg;list();msg='✅ 已儲存 '+outs.length+' 頁（共 '+pages.length+' 頁）'}}}
  }catch(e){showErr('拍攝處理',e);msg='錯誤：'+(e.message||e)}
  msgUntil=Date.now()+1500;busy=false;say(msg)}
 $('closeauto').onclick=()=>{running=false;stopLive();$('go').textContent='▶ 開始';stream&&stream.getTracks().forEach(t=>t.stop());stream=null;show(0,0,1,0)};
