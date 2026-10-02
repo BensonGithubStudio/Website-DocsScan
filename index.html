@@ -57,8 +57,10 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
     <span class="mu">※ 必須偵測到完整文件並穩定後才會拍攝</span>
     <label><input type="checkbox" id="adup" checked>略過重複頁面</label>
     <label><input type="checkbox" id="asnd" checked>🔊 啵聲提示</label>
+    <label><input type="checkbox" id="torch">💡 常亮閃光燈</label>
   </div>
   <div class="row"><button class="pri" id="go">▶ 開始</button><button id="closeauto">結束並返回</button></div>
+  <p class="mu" id="tst" style="margin:4px 0 0"></p>
   <p class="mu" id="ast"></p>
 </div>
 
@@ -409,8 +411,16 @@ $('openauto').onclick=async()=>{
  const E=$('camerr');E.classList.add('hide');
  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){E.textContent='此環境不支援相機即時串流。請把頁面連結複製到 Safari／Chrome 直接開啟，或改用「拍攝／選擇文件」。';E.classList.remove('hide');return}
  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-  $('vid').srcObject=stream;await $('vid').play();show(0,0,0,1);startLive();$('ast').textContent='相機就緒，把文件對準畫面後按「開始」'}
+  $('vid').srcObject=stream;await $('vid').play();show(0,0,0,1);startLive();applyTorch();$('ast').textContent='相機就緒，把文件對準畫面後按「開始」'}
  catch(e){showErr('相機',e);E.textContent='無法開啟相機（'+(e.name||'')+'）。可能是這個嵌入頁面沒有相機權限：請把頁面連結複製到 Safari／Chrome 直接開啟再試，並在瀏覽器允許相機。';E.classList.remove('hide')}};
+/* ---------- 閃光燈（常亮）：用 MediaStreamTrack 的 torch 限制；iOS Safari 等不支援的瀏覽器會提示 ---------- */
+async function applyTorch(){const cb=$('torch'),tt=$('tst'),tr=stream&&stream.getVideoTracks()[0];tt.textContent='';
+ if(!tr){return}
+ let cap={};try{cap=tr.getCapabilities?tr.getCapabilities():{}}catch(e){}
+ if(!('torch' in cap)){if(cb.checked){cb.checked=false;tt.textContent='⚠ 這支手機／瀏覽器不支援從網頁控制閃光燈（iPhone Safari 目前不支援，Android Chrome 通常可以）'}return}
+ try{await tr.applyConstraints({advanced:[{torch:cb.checked}]});if(cb.checked)tt.textContent='💡 閃光燈已常亮'}
+ catch(e){showErr('閃光燈',e);cb.checked=false;tt.textContent='⚠ 無法開啟閃光燈：'+(e.message||e.name)}}
+$('torch').onchange=applyTorch;
 let running=false,live,lq=null,stab=0,lastShot=0,msgUntil=0,ltb=false;const NEED=4,IV=()=>Math.max(1,+$('iv').value||3),say=t=>{$('ast').textContent=t};
 function startLive(){stopLive();stab=0;lq=null;spHist=[];live=setInterval(liveTick,180)}
 function stopLive(){clearInterval(live);live=null;const o=$('ovl');o.getContext('2d').clearRect(0,0,o.width,o.height)}
