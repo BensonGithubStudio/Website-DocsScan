@@ -162,17 +162,25 @@ function refineQuad(ed,W,H,Q){const E=ed.data,band=Math.max(3,Math.round(Math.ma
   if(pts.length<25)return Q;L.push(fitLn(pts))}
  const dg=Math.hypot(W,H);return Q.map((q,i)=>{const p=L[(i+3)%4],r=L[i],det=p.dx*(-r.dy)-p.dy*(-r.dx);if(Math.abs(det)<.2)return q;
   const t=((r.x-p.x)*(-r.dy)-(r.y-p.y)*(-r.dx))/det,v=[p.x+p.dx*t,p.y+p.dy*t];return Math.hypot(v[0]-q[0],v[1]-q[1])<dg*.02?v:q})}
-function detectCV(c,mD=400,refine=false){
+function detectCV(c,mD=400,refine=false,hint=null){
  const k=Math.min(1,mD/Math.max(c.width,c.height)),w=Math.round(c.width*k),h=Math.round(c.height*k),n=w*h,T=[],M=m=>{T.push(m);return m};
  const dflt=[[.05,.05],[.95,.05],[.95,.95],[.05,.95]].map(p=>[p[0]*c.width,p[1]*c.height]);
  try{
   const full=M(cv.imread(c)),sm=M(new cv.Mat()),gray=M(new cv.Mat()),bl=M(new cv.Mat()),ed=M(new cv.Mat()),edD=M(new cv.Mat()),bw=M(new cv.Mat());
   cv.resize(full,sm,new cv.Size(w,h),0,0,cv.INTER_AREA);cv.cvtColor(sm,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,bl,new cv.Size(5,5),0);
-  cv.Canny(bl,ed,30,90);const k3=M(cv.Mat.ones(3,3,cv.CV_8U)),k5=M(cv.Mat.ones(5,5,cv.CV_8U));
+  cv.Canny(bl,ed,30,90);const k3=M(cv.Mat.ones(3,3,cv.CV_8U)),k5=M(cv.Mat.ones(5,5,cv.CV_8U)),k9=M(cv.Mat.ones(9,9,cv.CV_8U)),k15=M(cv.Mat.ones(15,15,cv.CV_8U));
+  const satM=M(new cv.Mat(h,w,cv.CV_8UC1)),sd=sm.data;for(let i=0;i<n;i++){const r=sd[i*4],g=sd[i*4+1],b=sd[i*4+2],mxv=Math.max(r,g,b);satM.data[i]=mxv?(mxv-Math.min(r,g,b))*255/mxv:0}
   cv.dilate(ed,edD,k3,new cv.Point(-1,-1),1);
   const srcs=[],a1=M(new cv.Mat());cv.dilate(ed,a1,k3,new cv.Point(-1,-1),2);srcs.push([a1,cv.RETR_LIST]);
-  cv.threshold(bl,bw,0,255,cv.THRESH_BINARY|cv.THRESH_OTSU);cv.morphologyEx(bw,bw,cv.MORPH_CLOSE,k5);srcs.push([bw,cv.RETR_EXTERNAL]);
+  cv.threshold(bl,bw,0,255,cv.THRESH_BINARY|cv.THRESH_OTSU);const sl=M(new cv.Mat()),bc=M(new cv.Mat());cv.threshold(satM,sl,80,255,cv.THRESH_BINARY_INV);cv.bitwise_and(bw,sl,bc);
+  for(const m of[bw,bc]){cv.morphologyEx(m,m,cv.MORPH_CLOSE,k5);cv.morphologyEx(m,m,cv.MORPH_OPEN,k9);srcs.push([m,cv.RETR_EXTERNAL])}
   const D=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]),e=Math.max(2,w*.012),res=[];
+  const extra=Q=>{const cx=w/2,cy=h/2;for(let j=0;j<4;j++){const a=Q[j],b=Q[(j+1)%4];if((b[0]-a[0])*(cy-a[1])-(b[1]-a[1])*(cx-a[0])<0)return{why:'請把文件對準畫面中央'}}
+   const mk=M(cv.Mat.zeros(h,w,cv.CV_8U)),pm=M(cv.matFromArray(4,1,cv.CV_32SC2,Q.flat().map(Math.round))),inn=M(new cv.Mat()),dl=M(new cv.Mat()),ring=M(new cv.Mat());
+   cv.fillConvexPoly(mk,pm,new cv.Scalar(255));cv.erode(mk,inn,k9);cv.dilate(mk,dl,k15);cv.subtract(dl,mk,ring);
+   const I=cv.mean(bl,inn)[0],O=cv.mean(bl,ring)[0],S=cv.mean(satM,inn)[0],ct=I-O;
+   if(ct<12)return{why:'文件需比周圍背景亮，請放在深色桌面'};
+   return{f:(Math.min(1,ct/60)+.3)*Math.pow(1-S/255,2)}};
   const sup=(P)=>{let mn=1;for(let i=0;i<4;i++){const a=P[i],b=P[(i+1)%4];let hit=0,tot=0;for(let s=.05;s<=.95;s+=.025){const X=Math.round(a[0]+(b[0]-a[0])*s),Y=Math.round(a[1]+(b[1]-a[1])*s);tot++;if(X>=0&&Y>=0&&X<w&&Y<h&&edD.data[Y*w+X])hit++}mn=Math.min(mn,hit/tot)}return mn};
   for(const[m,mode]of srcs){const cs=M(new cv.MatVector()),hi=M(new cv.Mat());cv.findContours(m,cs,hi,mode,cv.CHAIN_APPROX_SIMPLE);
    for(let i=0;i<cs.size();i++){const ct=cs.get(i);const ar=cv.contourArea(ct);if(ar<n*.1){ct.delete();continue}
@@ -188,7 +196,7 @@ function detectCV(c,mD=400,refine=false){
     else if(ha/A>1.12||A/ha>1.12)why='邊緣不夠方正，可能被遮住';
     else if(Math.min(...L)<w*.12||Math.min(L[0],L[2])/Math.max(L[0],L[2])<.5||Math.min(L[1],L[3])/Math.max(L[1],L[3])<.5)why='文件角度太歪，請放正一些';
     else if(ra<.25||ra>4)why='形狀比例不像文件';
-    else{const sp=sup(Q);if(sp<.55)why='文件與背景對比不足，請放在深色桌面';else{res.push({Q,sc:A*sp});continue}}
+    else{const sp=sup(Q);if(sp<.55)why='文件與背景對比不足，請放在深色桌面';else{const x=extra(Q);if(x.why)why=x.why;else{let sc=A*sp*x.f;if(hint){const mv=Math.max(...Q.map((q,i)=>D(q,[hint[i][0]*k,hint[i][1]*k])))/Math.hypot(w,h);if(mv<.05)sc*=1.6}res.push({Q,sc});continue}}}
     res.push({Q,why,sc:A*.1})}}
   const okL=res.filter(r=>!r.why).sort((a,b)=>b.sc-a.sc),U=Q=>Q.map(p=>[p[0]/k,p[1]/k]);
   if(okL.length){let Q=U(okL[0].Q);
@@ -197,7 +205,7 @@ function detectCV(c,mD=400,refine=false){
   const bad=res.sort((a,b)=>b.sc-a.sc)[0];
   return{ok:false,pts:dflt,cand:bad&&U(bad.Q),why:bad?bad.why:'畫面中找不到文件'}
  }finally{T.forEach(m=>{try{m.delete()}catch(e){}})}}
-const DET=(c,m,rf)=>{if(cvReady)try{return detectCV(c,m,rf)}catch(e){console.warn('cv失敗，改用基本偵測',e)}return detect(c,m)};
+const DET=(c,m,rf,hn)=>{if(cvReady)try{return detectCV(c,m,rf,hn)}catch(e){console.warn('cv失敗，改用基本偵測',e)}return detect(c,m)};
 
 /* ---------- 邊緣編輯器 ---------- */
 function drawEd(){const e=$('ed'),r=Math.min(1,900/src.width);e.width=src.width*r;e.height=src.height*r;K=r;
@@ -338,7 +346,7 @@ function stopLive(){clearInterval(live);live=null;const o=$('ovl');o.getContext(
 /* 即時偵測：畫出文件外框；連續穩定 NEED 次才算「真的偵測到」 */
 function liveTick(){const v=$('vid');if(!v.videoWidth||busy||ltb)return;ltb=true;
  try{const k=Math.min(1,400/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
-  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=DET(fr,400),o=$('ovl'),x=o.getContext('2d');
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);const r=DET(fr,400,0,lq&&lq.map(p=>[p[0]*k,p[1]*k])),o=$('ovl'),x=o.getContext('2d');
   if(o.width!==v.videoWidth){o.width=v.videoWidth;o.height=v.videoHeight}x.clearRect(0,0,o.width,o.height);
   const S=P=>P.map(p=>[p[0]/k,p[1]/k]),poly=(P,c)=>{x.strokeStyle=c;x.lineWidth=Math.max(3,o.width/200);x.fillStyle=c+'33';x.beginPath();
    P.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fill();x.stroke()};
