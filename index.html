@@ -48,6 +48,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
     <label><input type="checkbox" id="afg" checked>去手指</label>
     <label><input type="checkbox" id="askip" checked>找不到文件時略過</label>
     <label><input type="checkbox" id="adup" checked>略過重複頁面</label>
+    <label><input type="checkbox" id="asnd" checked>🔊 拍照聲</label>
   </div>
   <div class="row"><button class="pri" id="go">▶ 開始</button><button id="closeauto">結束並返回</button></div>
   <p class="mu" id="ast"></p>
@@ -208,7 +209,14 @@ $('pdf').onclick=async()=>{const {jsPDF}=window.jspdf;let doc;
 list();
 
 /* ---------- 連續自動拍攝 ---------- */
-let stream,timer,busy=false,left=0,lastSig=null;
+let stream,timer,busy=false,left=0,lastSig=null,AC;
+function shutter(){if(!$('asnd').checked||!AC)return;try{
+ const t=AC.currentTime,n=Math.floor(AC.sampleRate*.12),b=AC.createBuffer(1,n,AC.sampleRate),d=b.getChannelData(0);
+ for(let i=0;i<n;i++){const e=i/n;d[i]=(Math.random()*2-1)*Math.exp(-e*18)*(e<.02?1:.6)+(Math.sin(i/9)*Math.exp(-e*40))*.5}
+ const s=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain();s.buffer=b;f.type='bandpass';f.frequency.value=2500;f.Q.value=.7;g.gain.value=.9;
+ s.connect(f);f.connect(g);g.connect(AC.destination);s.start(t);
+ const o=AC.createOscillator(),og=AC.createGain();o.frequency.setValueAtTime(900,t+.07);o.frequency.exponentialRampToValueAtTime(300,t+.12);
+ og.gain.setValueAtTime(0,t);og.gain.setValueAtTime(.25,t+.07);og.gain.exponentialRampToValueAtTime(.001,t+.13);o.connect(og);og.connect(AC.destination);o.start(t+.07);o.stop(t+.14)}catch(e){}}
 const gray48=c=>{const t=mk(48,48).getContext('2d',{willReadFrequently:true});t.drawImage(c,0,0,48,48);const d=t.getImageData(0,0,48,48).data,a=[];for(let i=0;i<d.length;i+=4)a.push(d[i]*.3+d[i+1]*.59+d[i+2]*.11);return a};
 $('openauto').onclick=async()=>{
  const E=$('camerr');E.classList.add('hide');
@@ -218,7 +226,7 @@ $('openauto').onclick=async()=>{
  catch(e){E.textContent='無法開啟相機（'+(e.name||'')+'）。可能是這個嵌入頁面沒有相機權限：請把頁面連結複製到 Safari／Chrome 直接開啟再試，並在瀏覽器允許相機。';E.classList.remove('hide')}};
 function stopAuto(){clearInterval(timer);timer=null;$('go').textContent='▶ 開始'}
 $('closeauto').onclick=()=>{stopAuto();stream&&stream.getTracks().forEach(t=>t.stop());stream=null;show(0,0,1,0)};
-$('go').onclick=()=>{if(timer){stopAuto();$('ast').textContent='已停止，共 '+pages.length+' 頁';return}
+$('go').onclick=()=>{try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();AC.resume()}catch(e){}if(timer){stopAuto();$('ast').textContent='已停止，共 '+pages.length+' 頁';return}
  lastSig=null;left=Math.max(1,+$('iv').value||3);$('go').textContent='⏸ 停止';$('ast').textContent='下次拍攝：'+left+' 秒';timer=setInterval(tick,1000)};
 async function tick(){
  if(busy)return;if(--left>0){$('ast').textContent='下次拍攝：'+left+' 秒（已存 '+pages.length+' 頁）';return}
@@ -226,7 +234,7 @@ async function tick(){
  await new Promise(r=>setTimeout(r,30));let msg='';
  try{const v=$('vid');if(!v.videoWidth)throw new Error('相機尚未就緒');
   const k=Math.min(1,2000/Math.max(v.videoWidth,v.videoHeight)),fr=mk(Math.round(v.videoWidth*k),Math.round(v.videoHeight*k));
-  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);
+  fr.getContext('2d').drawImage(v,0,0,fr.width,fr.height);shutter();
   src=fr;corners=detect(fr);
   if(!detectOk&&$('askip').checked)msg='未偵測到文件，已略過';
   else{raw=warp();const out=enhance(raw,{sh:$('ash').checked,fg:$('afg').checked,md:$('amd').value}),sg=gray48(out);
