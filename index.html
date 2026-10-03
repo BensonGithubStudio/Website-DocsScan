@@ -39,6 +39,17 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
 .pg img{width:100%;border-radius:4px;background:#fff}
 .pg button{padding:4px 8px;font-size:12px;margin:2px}
 .pg img{cursor:pointer}
+#osheet{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center}
+#osheet.hide{display:none}
+#osb{background:var(--bg);width:100%;max-width:640px;max-height:92vh;display:flex;flex-direction:column;border-radius:16px 16px 0 0;padding:12px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
+#osg{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;overflow:auto;flex:1;min-height:120px;margin:8px 0;-webkit-overflow-scrolling:touch}
+.oi{position:relative;border:2px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--card);aspect-ratio:3/4;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:30px;user-select:none;-webkit-user-select:none}
+.oi img{width:100%;height:100%;object-fit:cover}
+.oi.on{border-color:var(--ac)}
+.oi:not(.on)>img{opacity:.4}
+.oi .bd{position:absolute;top:4px;left:4px;min-width:24px;height:24px;border-radius:12px;background:var(--ac);color:#fff;font-size:13px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 5px;box-sizing:border-box;z-index:1}
+.oi.on .bd{display:flex}
+.oi .nm{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:10px;padding:2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>📄 文件掃描器</h1>
 <div id="eb" class="hide"><div class="row" style="margin:0 0 6px"><b>⚠ 錯誤訊息</b><button id="ebc">複製</button><button id="ebx">清除</button></div><pre id="ebt"></pre></div>
@@ -108,10 +119,18 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--bd);bac
   <p class="mu" id="empty">尚無頁面</p>
   <div class="row" style="margin-top:10px"><b style="font-size:14px">🛟 防閃退備份</b><select id="bkm"><option value="0">僅瀏覽器暫存</option><option value="1" id="bkm1">＋存到資料夾</option><option value="2">＋每張下載 JPG</option></select><button id="bkdir" class="hide">選擇資料夾</button></div>
   <p class="mu" id="bkst" style="margin:4px 0 0">每張拍完會自動暫存在瀏覽器，重新開啟網頁可一鍵復原。</p>
-  <div class="row"><button id="imp">📥 批次匯入圖片</button><label><input type="checkbox" id="impsort" checked>依檔名排序</label><input type="file" id="impf" accept="image/*" multiple class="hide"></div>
+  <div class="row"><button id="imp">📥 批次匯入圖片</button><button id="imppdf">📄 批次匯入 PDF</button><label><input type="checkbox" id="impsort" checked>預設依檔名排序</label><input type="file" id="impf" accept="image/*" multiple class="hide"><input type="file" id="imppf" accept="application/pdf,.pdf" multiple class="hide"></div>
   <p class="mu" id="ist" style="margin:4px 0 0"></p>
   <div class="row"><button class="pri" id="pdf" disabled>輸出 PDF</button><button id="clr" disabled>清空全部</button></div>
 </div>
+
+<div id="osheet" class="hide"><div id="osb">
+  <b id="ostt">選擇匯入順序</b>
+  <p class="mu" id="oshint" style="margin:4px 0 0">依想要的順序「依序點選」縮圖，編號就是匯入順序；再點一次可取消。未編號的不會匯入。</p>
+  <div id="osg"></div>
+  <div class="row" style="margin-top:0"><button id="osclr">清除編號重新點</button><button id="osname">依檔名</button><button id="ostime">依時間</button><button id="osrev">反轉</button><button id="osadd">＋再加入</button></div>
+  <div class="row"><button class="pri" id="osgo">匯入</button><button id="oscan">取消</button></div>
+</div></div>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -440,13 +459,53 @@ const natCmp=(a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitiv
 async function loadImg(f){
  if(window.createImageBitmap){try{return await createImageBitmap(f)}catch(e){}}
  return await new Promise((ok,ng)=>{const u=URL.createObjectURL(f),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);ok(im)};im.onerror=()=>{URL.revokeObjectURL(u);ng(new Error('無法解碼此圖片格式'))};im.src=u})}
+/* ---------- 匯入順序選擇器（手機系統相簿無法控制順序，改在 App 內點選排序） ---------- */
+async function thumb(f){let im;if(window.createImageBitmap){try{im=await createImageBitmap(f,{resizeWidth:200,resizeQuality:'low'})}catch(e){}}
+ if(!im)im=await loadImg(f);
+ const k=Math.min(1,200/Math.max(im.width,im.height)),w=Math.max(1,Math.round(im.width*k)),h=Math.max(1,Math.round(im.height*k)),c=mk(w,h);
+ c.getContext('2d').drawImage(im,0,0,w,h);if(im.close)im.close();return c.toDataURL('image/jpeg',.6)}
+function pickOrder(files,kind){return new Promise(resolve=>{
+ const isP=kind==='pdf',g=$('osg'),
+  ok=f=>isP?(f.type==='application/pdf'||/\.pdf$/i.test(f.name)):(f.type.startsWith('image/')||/\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name));
+ let items=[],order=[],alive=true,thq=Promise.resolve();
+ $('ostt').textContent='選擇'+(isP?' PDF ':'圖片')+'匯入順序';
+ function upd(){items.forEach((it,i)=>{const k=order.indexOf(i);it.el.classList.toggle('on',k>=0);it.el.querySelector('.bd').textContent=k+1});
+  $('osgo').textContent='匯入 '+order.length+' 個'+(isP?' PDF':'圖片');$('osgo').disabled=!order.length}
+ function add(fs,first){const seen=new Set(items.map(it=>it.key));
+  for(const f of fs.filter(ok)){const key=f.name+'|'+f.size+'|'+f.lastModified;if(seen.has(key))continue;seen.add(key);
+   const el=document.createElement('div');el.className='oi';el.innerHTML='<div class="bd"></div><div class="nm"></div>';el.querySelector('.nm').textContent=f.name;
+   const it={f,key,el},idx=items.push(it)-1;
+   el.onclick=()=>{const k=order.indexOf(idx);if(k>=0)order.splice(k,1);else order.push(idx);upd()};
+   g.appendChild(el);order.push(idx);
+   if(isP)el.insertAdjacentText('afterbegin','📄');
+   else thq=thq.then(async()=>{if(!alive)return;try{const im=new Image();im.src=await thumb(f);el.insertBefore(im,el.firstChild)}catch(e){}})}
+  if(first&&$('impsort').checked)byName();upd()}
+ const sortBy=fn=>{order=items.map((_,i)=>i).sort(fn);upd()},
+  byName=()=>sortBy((a,b)=>natCmp(items[a].f,items[b].f));
+ const fin=v=>{alive=false;$('osheet').classList.add('hide');g.innerHTML='';resolve(v)};
+ $('osclr').onclick=()=>{order=[];upd()};
+ $('osname').onclick=byName;
+ $('ostime').onclick=()=>sortBy((a,b)=>(items[a].f.lastModified-items[b].f.lastModified)||natCmp(items[a].f,items[b].f));
+ $('osrev').onclick=()=>{order.reverse();upd()};
+ $('osadd').onclick=()=>{const t=document.createElement('input');t.type='file';t.multiple=true;t.accept=isP?'application/pdf,.pdf':'image/*';t.onchange=()=>add([...t.files],false);t.click()};
+ $('osgo').onclick=()=>fin(order.map(i=>items[i].f));
+ $('oscan').onclick=()=>fin(null);
+ g.innerHTML='';add(files,true);
+ if(!items.length){fin([]);return}
+ $('osheet').classList.remove('hide');g.scrollTop=0})}
+
+/* ---------- 批次匯入圖片 ---------- */
 $('imp').onclick=()=>$('impf').click();
 $('impf').onchange=async()=>{
- let fs=[...$('impf').files].filter(f=>f.type.startsWith('image/')||/\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name));
- $('impf').value='';
- if(!fs.length){$('ist').textContent='沒有可用的圖片';return}
- if($('impsort').checked)fs.sort(natCmp);
- const ib=$('imp');ib.disabled=true;let ok=0;const bad=[];
+ const fs=[...$('impf').files];$('impf').value='';
+ if(!fs.length)return;
+ const o=await pickOrder(fs,'img');
+ if(!o){$('ist').textContent='已取消匯入';return}
+ if(!o.length){$('ist').textContent='沒有可匯入的圖片';return}
+ await importImgs(o)};
+const impBtns=dis=>{$('imp').disabled=$('imppdf').disabled=dis};
+async function importImgs(fs){
+ impBtns(true);let ok=0;const bad=[];
  for(let i=0;i<fs.length;i++){
   $('ist').textContent='匯入中 '+(i+1)+' / '+fs.length+'：'+fs[i].name;
   await new Promise(r=>setTimeout(r,0));
@@ -460,9 +519,54 @@ $('impf').onchange=async()=>{
    ok++;
   }catch(e){bad.push(fs[i].name);showErr('匯入失敗：'+fs[i].name,e)}
  }
- list();ib.disabled=false;
- $('ist').textContent='✅ 已匯入 '+ok+' 張（共 '+pages.length+' 頁）'+(bad.length?'｜❌ 失敗 '+bad.length+' 張：'+bad.join('、'):'');
-};
+ list();impBtns(false);
+ $('ist').textContent='✅ 已匯入 '+ok+' 張（共 '+pages.length+' 頁）'+(bad.length?'｜❌ 失敗 '+bad.length+' 張：'+bad.join('、'):'')}
+
+/* ---------- 批次匯入 PDF（逐檔、逐頁依序轉成頁面） ---------- */
+const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/',PDFMAX=2200;
+let pdfjsP=null;
+function loadPdfJs(){if(pdfjsP)return pdfjsP;
+ pdfjsP=new Promise((ok,ng)=>{const s=document.createElement('script');s.src=PDFJS+'pdf.min.js';
+  s.onload=async()=>{const lib=window.pdfjsLib;
+   try{const r=await fetch(PDFJS+'pdf.worker.min.js');if(!r.ok)throw new Error('HTTP '+r.status);lib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(await r.blob())}
+   catch(e){lib.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.js'}
+   ok(lib)};
+  s.onerror=()=>ng(new Error('PDF 模組載入失敗，請確認網路連線'));document.head.appendChild(s)});
+ pdfjsP.catch(()=>{pdfjsP=null});return pdfjsP}
+$('imppdf').onclick=()=>$('imppf').click();
+$('imppf').onchange=async()=>{
+ const fs=[...$('imppf').files];$('imppf').value='';
+ if(!fs.length)return;
+ const o=await pickOrder(fs,'pdf');
+ if(!o){$('ist').textContent='已取消匯入';return}
+ if(!o.length){$('ist').textContent='沒有可匯入的 PDF';return}
+ await importPdfs(o)};
+async function importPdfs(fs){
+ impBtns(true);let nf=0,np=0;const bad=[];
+ try{
+  $('ist').textContent='載入 PDF 模組中…';
+  let lib;try{lib=await loadPdfJs()}catch(e){showErr('PDF 模組',e);$('ist').textContent='❌ '+e.message;return}
+  for(let fi=0;fi<fs.length;fi++){
+   const f=fs[fi];let doc=null;
+   try{
+    doc=await lib.getDocument({data:await f.arrayBuffer()}).promise;
+    for(let n=1;n<=doc.numPages;n++){
+     $('ist').textContent='PDF '+(fi+1)+' / '+fs.length+'：'+f.name+'　第 '+n+' / '+doc.numPages+' 頁';
+     await new Promise(r=>setTimeout(r,0));
+     const pg=await doc.getPage(n),v1=pg.getViewport({scale:1}),sc=PDFMAX/Math.max(v1.width,v1.height),vp=pg.getViewport({scale:sc}),
+      w=Math.round(vp.width),h=Math.round(vp.height),c=mk(w,h),x=c.getContext('2d');
+     x.fillStyle='#fff';x.fillRect(0,0,w,h);
+     await pg.render({canvasContext:x,viewport:vp}).promise;pg.cleanup();
+     const url=c.toDataURL('image/jpeg',.92);
+     pages.push({url,w,h,srcUrl:url,corners:[[0,0],[w,0],[w,h],[0,h]],opts:{sh:0,fg:0,md:'color',br:0,ct:1,rot:0},note:'',noBk:1});
+     np++}
+    nf++;
+   }catch(e){bad.push(f.name+(e&&e.name==='PasswordException'?'（有密碼保護）':''));showErr('PDF 匯入失敗：'+f.name,e)}
+   finally{if(doc)try{await doc.destroy()}catch(e){}}
+   list();
+  }
+  $('ist').textContent='✅ 已匯入 '+nf+' 個 PDF、'+np+' 頁（共 '+pages.length+' 頁）'+(bad.length?'｜❌ 失敗 '+bad.length+' 個：'+bad.join('、'):'');
+ }finally{list();impBtns(false)}}
 
 /* ---------- 防閃退備份（IndexedDB 自動暫存 ＋ 選用資料夾／下載） ---------- */
 var DB=null,pend=false,stored=new Set(),pq=Promise.resolve(),leftover=[],bkm=0,dirH=null;
